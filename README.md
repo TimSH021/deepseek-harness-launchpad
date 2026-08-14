@@ -144,7 +144,7 @@ DSH_LAUNCHER_DSH_PORT=4895 "DeepSeek Harness 启动台.app/Contents/MacOS/DSH La
 
 ## License
 
-[MIT](LICENSE) © 2026 tangxy
+[MIT](LICENSE) © 2026 TimSH021
 
 ---
 
