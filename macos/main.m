@@ -583,7 +583,18 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
             toItem:content attribute:NSLayoutAttributeTrailing multiplier:1 constant:0],
     ]];
 
-    NSWindow *win = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 820, 680)
+    // UI 自检可指定窗口尺寸（DSH_LAUNCHER_TEST_SIZE=宽x高），默认 820x680
+    CGFloat winW = 820, winH = 680;
+    NSString *sz = [[NSProcessInfo processInfo] environment][@"DSH_LAUNCHER_TEST_SIZE"];
+    if (sz.length) {
+        NSArray *parts = [sz componentsSeparatedByString:@"x"];
+        NSString *sw = parts.count > 0 ? parts[0] : @"";
+        NSString *sh = parts.count > 1 ? parts[1] : @"";
+        if (sw.integerValue > 300 && sh.integerValue > 300) {
+            winW = sw.integerValue; winH = sh.integerValue;
+        }
+    }
+    NSWindow *win = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, winW, winH)
         styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
               | NSWindowStyleMaskFullSizeContentView
         backing:NSBackingStoreBuffered defer:NO];

@@ -13,7 +13,7 @@
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
+html,body{height:100%;overflow:hidden}
 body{
   font-family:"PingFang SC","Hiragino Sans GB",-apple-system,"Helvetica Neue","Microsoft YaHei",sans-serif;
   color:var(--ink);
@@ -22,6 +22,7 @@ body{
              linear-gradient(160deg,var(--bg1) 0%,var(--bg0) 70%);
   min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden;
   -webkit-font-smoothing:antialiased;padding-top:28px; /* 让出红绿灯标题栏（App 模式） */
+html.web body{padding-top:14px}
 }
 
 /* ---------- 粒子画布 ---------- */
@@ -47,12 +48,13 @@ body{
 @keyframes blink{50%{opacity:.25}}
 
 /* ---------- 主体卡片 ---------- */
-.wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  padding:26px 18px 20px}
-.card{width:min(760px,94vw);background:var(--glass);border:1px solid var(--line);border-radius:30px;
+.wrap{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:14px 16px 10px}
+.card{width:min(720px,94vw);background:var(--glass);border:1px solid var(--line);border-radius:30px;
   backdrop-filter:blur(26px) saturate(150%);-webkit-backdrop-filter:blur(26px) saturate(150%);
   box-shadow:0 30px 80px rgba(0,4,14,.55), inset 0 1px 0 rgba(190,235,255,.08);
-  padding:clamp(26px,4vw,46px) clamp(24px,5vw,56px) clamp(22px,4vw,32px);
+  padding:clamp(16px,3vh,30px) clamp(20px,4vw,48px) clamp(14px,2.5vh,22px);
   display:flex;flex-direction:column;align-items:center;text-align:center;
   animation:fadeUp .8s cubic-bezier(.2,.7,.2,1) .12s both}
 .card>*{animation:fadeUp .7s cubic-bezier(.2,.7,.2,1) both}
@@ -61,18 +63,19 @@ body{
 .card>*:nth-child(6){animation-delay:.5s}.card>*:nth-child(7){animation-delay:.56s}
 
 /* 状态球（呼吸灯） */
-.orb{position:relative;width:172px;height:172px;display:grid;place-items:center;margin-bottom:26px}
+.orb{position:relative;width:clamp(104px,15vh,148px);height:clamp(104px,15vh,148px);
+  display:grid;place-items:center;margin-bottom:clamp(10px,2.4vh,20px)}
 .orb .ring{position:absolute;inset:0;border-radius:50%;
   background:conic-gradient(from 0deg,transparent 0 62%,rgba(58,240,207,.9) 82%,transparent 100%);
   -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 3px));
           mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 3px));
   opacity:0;transition:opacity .5s}
-.orb .core{width:132px;height:132px;border-radius:50%;display:grid;place-items:center;
+.orb .core{width:calc(100% - 34px);height:calc(100% - 34px);border-radius:50%;display:grid;place-items:center;
   background:radial-gradient(circle at 32% 28%,#123455 0%,#081c33 58%,#050f1e 100%);
   border:1px solid rgba(140,215,255,.2);
   box-shadow:inset 0 0 34px rgba(20,60,90,.7), 0 0 0 rgba(58,240,207,0);
   transition:box-shadow .6s,border-color .6s}
-.orb .core svg{width:66px;height:66px;opacity:.5;transition:opacity .6s,filter .6s}
+.orb .core svg{width:58%;height:58%;opacity:.5;transition:opacity .6s,filter .6s}
 /* 呼吸扩散环 */
 .orb .pulse{position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(58,240,207,.55);
   opacity:0;display:none;pointer-events:none}
@@ -95,15 +98,15 @@ body{
 @keyframes breath{50%{transform:scale(1.045)}}
 @keyframes pulse{0%{transform:scale(.72);opacity:0}12%{opacity:.55}100%{transform:scale(1.8);opacity:0}}
 
-h1{font-size:clamp(30px,5vw,44px);font-weight:800;letter-spacing:.01em;line-height:1.15}
+h1{font-size:clamp(24px,4.2vh,36px);font-weight:800;letter-spacing:.01em;line-height:1.15}
 h1 span{background:linear-gradient(100deg,var(--cyan),var(--blue));
   -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;padding-right:.06em}
-.sub{margin-top:10px;color:var(--ink-dim);font-size:14.5px;letter-spacing:.14em}
+.sub{margin-top:6px;color:var(--ink-dim);font-size:13px;letter-spacing:.14em}
 
 /* 地址胶囊 */
-.url{margin-top:26px;display:inline-flex;align-items:center;gap:10px;cursor:pointer;
-  font-family:var(--mono);font-size:14.5px;color:#bfe9de;letter-spacing:.03em;
-  padding:11px 20px;border-radius:999px;background:rgba(4,14,26,.66);
+.url{margin-top:clamp(10px,2.2vh,18px);display:inline-flex;align-items:center;gap:10px;cursor:pointer;
+  font-family:var(--mono);font-size:13.5px;color:#bfe9de;letter-spacing:.03em;
+  padding:9px 18px;border-radius:999px;background:rgba(4,14,26,.66);
   border:1px dashed rgba(120,220,200,.3);transition:border-color .25s,transform .25s}
 .url:hover{border-color:rgba(58,240,207,.65);transform:translateY(-1px)}
 .url svg{width:15px;height:15px;opacity:.7}
@@ -112,10 +115,11 @@ h1 span{background:linear-gradient(100deg,var(--cyan),var(--blue));
 .url:hover .copy{color:var(--cyan)}
 
 /* 按钮 */
-.actions{margin-top:30px;display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+.actions{margin-top:clamp(12px,2.6vh,22px);display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
 .btn{appearance:none;cursor:pointer;font-family:inherit;font-size:15px;font-weight:600;
-  padding:0 30px;height:52px;border-radius:999px;letter-spacing:.06em;
+  padding:0 26px;height:46px;border-radius:999px;letter-spacing:.06em;
   transition:transform .22s cubic-bezier(.2,.7,.2,1),box-shadow .22s,filter .22s,opacity .3s}
+.btn.primary{min-width:176px}
 .btn:active{transform:translateY(1px) scale(.985)}
 .btn.primary{border:none;color:#03121d;
   background:linear-gradient(135deg,#43f2cd 0%,#3f8cff 100%);
@@ -131,7 +135,7 @@ h1 span{background:linear-gradient(100deg,var(--cyan),var(--blue));
 .btn:disabled{opacity:.38;cursor:not-allowed}
 
 /* 元信息 */
-.meta{margin-top:30px;width:100%;display:flex;flex-wrap:wrap;gap:10px 26px;justify-content:center;
+.meta{margin-top:clamp(10px,2.4vh,18px);width:100%;display:flex;flex-wrap:wrap;gap:10px 26px;justify-content:center;
   font-size:12.5px;color:var(--ink-faint);letter-spacing:.08em}
 .meta b{color:var(--ink-dim);font-family:var(--mono);font-weight:500;margin-left:4px}
 .switch{display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none}
@@ -144,8 +148,8 @@ h1 span{background:linear-gradient(100deg,var(--cyan),var(--blue));
 .switch input:checked + i::after{transform:translateX(12px);background:var(--cyan)}
 
 /* 安装 / 更新 / 自启 */
-.setup{margin-top:20px;width:100%;display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;justify-content:center;
-  padding-top:16px;border-top:1px dashed rgba(130,215,255,.14)}
+.setup{margin-top:clamp(8px,2vh,14px);width:100%;display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;justify-content:center;
+  padding-top:12px;border-top:1px dashed rgba(130,215,255,.14)}
 .chip{appearance:none;cursor:pointer;font-family:inherit;font-size:12.5px;letter-spacing:.05em;
   padding:8px 16px;border-radius:999px;background:transparent;color:#c3dcf5;
   border:1px solid rgba(140,190,255,.22);transition:all .2s}
@@ -156,20 +160,20 @@ h1 span{background:linear-gradient(100deg,var(--cyan),var(--blue));
 html.web .apponly{display:none}
 
 /* 日志 */
-.logs{margin-top:26px;width:100%;border-top:1px dashed rgba(130,215,255,.16);padding-top:18px;text-align:left}
+.logs{margin-top:16px;width:100%;border-top:1px dashed rgba(130,215,255,.16);padding-top:18px;text-align:left}
 .logbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;
   font-size:12px;color:var(--ink-faint);letter-spacing:.14em}
 .logbar button{appearance:none;background:none;border:none;color:var(--ink-faint);cursor:pointer;
   font-size:12px;font-family:inherit;letter-spacing:.1em}
 .logbar button:hover{color:var(--cyan)}
-#logOut{max-height:230px;overflow:auto;background:rgba(2,8,18,.75);border:1px solid rgba(120,215,255,.1);
+#logOut{max-height:min(170px,22vh);overflow:auto;background:rgba(2,8,18,.75);border:1px solid rgba(120,215,255,.1);
   border-radius:14px;padding:14px 16px;font-family:var(--mono);font-size:12px;line-height:1.75;
   color:#9fd8cc;white-space:pre-wrap;word-break:break-all}
 #logOut .e{color:#ff9aa8}
 #logOut::-webkit-scrollbar{width:8px}
 #logOut::-webkit-scrollbar-thumb{background:rgba(120,200,255,.18);border-radius:4px}
 
-.foot{padding:14px;text-align:center;font-size:12px;color:var(--ink-faint);letter-spacing:.12em;
+.foot{padding:8px 10px;text-align:center;font-size:12px;color:var(--ink-faint);letter-spacing:.12em;
   animation:fadeUp .7s .55s both}
 
 /* Toast */
@@ -185,8 +189,8 @@ html.web .apponly{display:none}
 @keyframes fadeDown{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
 
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-@media (max-width:520px){.orb{width:140px;height:140px}.orb .core{width:106px;height:106px}
-  .orb .core svg{width:52px;height:52px}.btn{height:48px;padding:0 22px}}
+@media (max-width:520px){.btn{height:44px;padding:0 20px}}
+@media (max-height:600px){.sub{display:none}.orb{width:92px;height:92px}.orb .core svg{width:60%;height:60%}}
 </style>
 </head>
 <body>
@@ -623,6 +627,8 @@ window.__selfcheck = function () {
     bridge: hasBridge,
     viewport: { w: innerWidth, h: innerHeight },
     hOverflow: document.documentElement.scrollWidth > innerWidth,
+    vOverflow: document.documentElement.scrollHeight > innerHeight,
+    scrollH: document.documentElement.scrollHeight + '/' + innerHeight,
     cardCentered: Math.abs(card.x + card.width / 2 - innerWidth / 2) < 2,
     cardSize: { w: Math.round(card.width), h: Math.round(card.height) },
     orbCenterX: Math.round(orbR.x + orbR.width / 2),
@@ -635,6 +641,16 @@ window.__selfcheck = function () {
     setupRow: !!document.getElementById('updBtn'),
     verText: document.getElementById('verText').textContent,
     h1: cs(document.querySelector('h1'), 'fontSize') + '/' + cs(document.querySelector('h1'), 'fontWeight'),
+    layout: (() => {
+      const seg = {};
+      for (const sel of ['.top', '.card', '.foot']) {
+        const el = document.querySelector(sel);
+        if (el) { const r = el.getBoundingClientRect(); seg[sel] = [Math.round(r.top), Math.round(r.bottom)]; }
+      }
+      seg.bodySH = document.body.scrollHeight;
+      seg.docSH = document.documentElement.scrollHeight;
+      return seg;
+    })(),
   });
 };
 
