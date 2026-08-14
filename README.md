@@ -56,6 +56,32 @@ Windows 双击 `DSH-Launcher.vbs`（无黑窗）或 `DSH-Launcher.bat`。
 
 Linux 桌面集成：把 `dsh-launcher.desktop` 中的 `%REPLACE_ME%` 替换为仓库绝对路径，复制到 `~/.local/share/applications/`。
 
+### 🤖 让 AI 帮你装（推荐）
+
+不想手敲命令？把下面整段复制给任意终端型 AI 助手（Claude Code / Codex CLI / Cursor / Gemini CLI 等），它会自动完成检测、克隆、构建、安装与验证：
+
+```text
+请帮我安装 DeepSeek Harness 启动台（开源仓库 https://github.com/TimSH021/deepseek-harness-launchpad），
+它是 DeepSeek dsh（npx @deepseek-ai/dsh web）的一键启动器。请按以下步骤执行，每步给我结果反馈：
+
+1. 检测当前操作系统（macOS / Linux / Windows）与已装工具（git、node --version）。
+2. 克隆仓库到 ~/deepseek-harness-launchpad。
+3. 按平台安装：
+   - macOS：运行 xcode-select -p 确认 Command Line Tools，缺失就先安装；
+     然后执行 ./macos/build.sh 构建原生 App（clang + AppKit + WebKit）；
+     构建成功后把生成的「DeepSeek Harness 启动台.app」复制到 /Applications 并打开它。
+   - Linux / Windows：确认 Node.js ≥ 18（dsh 依赖 Node）；
+     运行 cross/start.sh（Linux/macOS）或告诉我双击 cross/DSH-Launcher.vbs（Windows）。
+4. 验证安装：
+   - macOS："DeepSeek Harness 启动台.app/Contents/MacOS/DSH Launcher" --probe
+     应输出 alive=0 或 alive=1（ours=0 表示已有你手动启动的实例，属正常）；
+     再跑一次 --bridge-test，应 5 项全部通过。
+   - Linux / Windows：访问 http://127.0.0.1:4899 能看到启动台界面。
+5. 遇到权限、网络或工具缺失问题时，先向我说明并获得确认再继续，不要静默跳过或伪造成功。
+```
+
+> 💡 提示词要求 AI「每步反馈 + 不静默跳过」，装完你会得到一份完整的执行记录，出问题随时能回溯。
+
 ## 🖥 界面一览
 
 - **状态球**：青色呼吸+粒子环绕 = 运行中；琥珀脉冲 = 启动中；暗红静止 = 已停止
