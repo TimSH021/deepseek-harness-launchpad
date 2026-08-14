@@ -33,7 +33,7 @@ html.web body{padding-top:14px}
 .top{display:flex;align-items:center;justify-content:space-between;
   padding:12px clamp(20px,4vw,42px) 0;animation:fadeDown .7s cubic-bezier(.2,.7,.2,1) both}
 .brand{display:flex;align-items:center;gap:12px;font-weight:700;letter-spacing:.04em}
-.brand svg{width:34px;height:34px;flex:none;filter:drop-shadow(0 0 10px rgba(58,240,207,.45))}
+.brand svg{width:30px;height:30px;flex:none;filter:drop-shadow(0 0 10px rgba(58,240,207,.45))}
 .brand em{font-style:normal;color:var(--ink-dim);font-weight:500}
 .pill{display:flex;align-items:center;gap:8px;font-size:13px;padding:7px 14px;border-radius:999px;
   background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(14px);
@@ -75,7 +75,7 @@ html.web body{padding-top:14px}
   border:1px solid rgba(140,215,255,.2);
   box-shadow:inset 0 0 34px rgba(20,60,90,.7), 0 0 0 rgba(58,240,207,0);
   transition:box-shadow .6s,border-color .6s}
-.orb .core svg{width:58%;height:58%;opacity:.5;transition:opacity .6s,filter .6s}
+.orb .core svg{width:40%;height:40%;opacity:.5;transition:opacity .6s,filter .6s}
 /* 呼吸扩散环 */
 .orb .pulse{position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(58,240,207,.55);
   opacity:0;display:none;pointer-events:none}
@@ -132,6 +132,9 @@ h1 span{background:linear-gradient(100deg,var(--cyan),var(--blue));
 .btn.ghost:hover:not(:disabled){transform:translateY(-2px);border-color:rgba(160,210,255,.5);color:#fff}
 .btn.ghost.danger:hover:not(:disabled){border-color:rgba(255,93,115,.55);color:#ffb9c4;
   box-shadow:0 8px 26px rgba(255,93,115,.15)}
+.btn.ghost.danger.armed{border-color:rgba(255,93,115,.8);color:#ffd7dd;background:rgba(255,93,115,.12);
+  animation:armBlink .9s steps(2) infinite}
+@keyframes armBlink{50%{background:rgba(255,93,115,.25)}}
 .btn:disabled{opacity:.38;cursor:not-allowed}
 
 /* 元信息 */
@@ -190,7 +193,7 @@ html.web .apponly{display:none}
 
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 @media (max-width:520px){.btn{height:44px;padding:0 20px}}
-@media (max-height:600px){.sub{display:none}.orb{width:92px;height:92px}.orb .core svg{width:60%;height:60%}}
+@media (max-height:600px){.sub{display:none}.orb{width:92px;height:92px}.orb .core svg{width:44%;height:44%}}
 </style>
 </head>
 <body>
@@ -332,7 +335,12 @@ function render() {
   mainBtn.disabled = k === 'starting';
   mainBtn.textContent = (k === 'run-ours' || k === 'run-external') ? '打开界面'
                         : k === 'starting' ? '启动中…' : '启动 DeepSeek';
-  stopBtn.disabled = !(k === 'run-ours' || k === 'starting');
+  const external = k === 'run-external';
+  stopBtn.disabled = false;
+  stopBtn.classList.toggle('armed', external && stopArmed);
+  stopBtn.textContent = (k === 'run-ours' || k === 'starting') ? '停止'
+                        : external ? (stopArmed ? '确认强制停止？' : '强制停止') : '停止';
+  stopBtn.title = external ? '该实例不是启动台拉起的，点击一次预备、再点一次确认强制停止' : '';
 
   $('mProc').textContent = k === 'run-ours' ? '#' + d.pid + (d.adopted ? ' · 已认领' : '')
                           : k === 'run-external' ? '外部进程'
@@ -363,17 +371,36 @@ mainBtn.addEventListener('click', async () => {
   refresh();
 });
 
+let stopArmed = false, stopArmTimer = null;
 stopBtn.addEventListener('click', async () => {
+  const external = st && stateOf(st) === 'run-external';
+  if (external && !stopArmed) {
+    stopArmed = true; render();
+    showToast('将强制停止外部实例（进程树），再点一次确认');
+    clearTimeout(stopArmTimer);
+    stopArmTimer = setTimeout(() => { stopArmed = false; render(); }, 3500);
+    return;
+  }
+  stopArmed = false; clearTimeout(stopArmTimer);
   stopBtn.disabled = true;
-  try { await api('stop'); showToast('已发送停止信号'); }
+  try { await api('stop', { force: external }); showToast('已发送停止信号'); }
   catch (e) { showToast(String(e.message || e), true); }
+  render();
   refresh();
 });
 
 $('urlBtn').addEventListener('click', async () => {
   const url = $('urlText').textContent;
-  try { await navigator.clipboard.writeText(url); showToast('已复制 ' + url); }
-  catch { showToast('复制失败，请手动选择', true); }
+  let copied = false;
+  try { await navigator.clipboard.writeText(url); copied = true; } catch {}
+  if (!copied) {
+    const ta = document.createElement('textarea');
+    ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { copied = document.execCommand('copy'); } catch {}
+    ta.remove();
+  }
+  showToast(copied ? '已复制 ' + url : '复制失败，请手动选择', !copied);
 });
 
 $('autoOpen').checked = localStorage.getItem('dsh.autoOpen') !== '0';
@@ -635,6 +662,7 @@ window.__selfcheck = function () {
     orbState: document.getElementById('orb').dataset.s,
     pill: document.getElementById('stateText').textContent,
     mainBtn: document.getElementById('mainBtn').textContent,
+    stopBtn: document.getElementById('stopBtn').textContent + '/disabled:' + document.getElementById('stopBtn').disabled,
     btnGradient: cs(document.getElementById('mainBtn'), 'backgroundImage').includes('linear-gradient'),
     cardBlur: cs(document.querySelector('.card'), 'backdropFilter').includes('blur'),
     fx: { canvas: canvasOK, particles: window.__fx ? window.__fx.count : 0, mode: window.__fx ? window.__fx.mode() : '?' },

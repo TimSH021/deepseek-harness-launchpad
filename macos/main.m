@@ -414,6 +414,42 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
     self.adoptedPid = nil;
 }
 
+// 端口 → pid（lsof）
+- (NSNumber *)pidByPort:(int)port {
+    NSTask *t = [NSTask new];
+    t.launchPath = @"/usr/sbin/lsof";
+    t.arguments = @[@"-nP", [NSString stringWithFormat:@"-tiTCP:%d", port], @"-sTCP:LISTEN"];
+    t.standardOutput = [NSPipe pipe];
+    t.standardError = [NSFileHandle fileHandleWithNullDevice];
+    @try { [t launch]; [t waitUntilExit]; } @catch (NSException *e) { return nil; }
+    NSData *d = ((NSPipe *)t.standardOutput).fileHandleForReading.readDataToEndOfFile;
+    NSString *out = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding] ?: @"";
+    for (NSString *line in [out componentsSeparatedByString:@"\n"]) {
+        int v = [[line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] intValue];
+        if (v > 0) return @(v);
+    }
+    return nil;
+}
+
+// 强制停止端口上的外部实例（二次确认后调用；按进程树先子后父）
+- (NSDictionary *)forceStopByPort:(int)port {
+    NSNumber *pidNum = [self pidByPort:port];
+    if (!pidNum) return @{@"error": [NSString stringWithFormat:@"端口 %d 上没有发现进程", port]};
+    pid_t pid = pidNum.intValue;
+    [self logLine:[NSString stringWithFormat:@"强制停止外部实例 pid=%d（端口 %d）", pid, port]];
+    NSMutableArray<NSNumber *> *tree = [NSMutableArray new];
+    [self collectTree:pid into:tree];
+    for (NSNumber *t in [tree subarrayWithRange:NSMakeRange(0, tree.count - 1)]) kill(t.intValue, SIGTERM);
+    kill(pid, SIGTERM);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
+                   dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSMutableArray<NSNumber *> *left = [NSMutableArray new];
+        [self collectTree:pid into:left];
+        for (NSNumber *t in left) kill(t.intValue, SIGKILL);
+    });
+    return @{@"stopped": @YES, @"forced": @YES, @"pid": pidNum};
+}
+
 - (void)openBrowser {
     NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"http://%@:%d", kDSHHost, kDshPort]];
     void (^open)(void) = ^{ [[NSWorkspace sharedWorkspace] openURL:url]; };
@@ -458,78 +494,104 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
     if (![body isKindOfClass:[NSDictionary class]]) { replyHandler(nil, @"bad message"); return; }
     NSString *cmd = body[@"cmd"];
     NSDictionary *payload = body[@"body"] ?: @{};
-    ProcMan *pm = ProcMan.shared;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        if ([cmd isEqualToString:@"status"]) {
-            replyHandler([pm statusDict], nil);
-        } else if ([cmd isEqualToString:@"start"]) {
-            BOOL autoOpen = payload[@"autoOpen"] ? [payload[@"autoOpen"] boolValue] : YES;
-            if ([pm probeDsh:1500]) {
-                [pm openBrowser];
-                replyHandler(@{@"status": @"already-running", @"opened": @YES}, nil);
-                return;
-            }
-            NSString *err = nil;
-            NSDictionary *r = [pm startWithAutoOpen:autoOpen onReady:nil error:&err];
-            if (err) replyHandler(nil, err);
-            else replyHandler(r, nil);
-        } else if ([cmd isEqualToString:@"open"]) {
-            if ([pm probeDsh:1500]) { [pm openBrowser]; replyHandler(@{@"opened": @YES}, nil); }
-            else replyHandler(nil, @"dsh web 未在运行");
-        } else if ([cmd isEqualToString:@"stop"]) {
-            NSDictionary *st = [pm statusDict];
-            NSDictionary *d = st[@"dsh"];
-            BOOL alive = [d[@"alive"] boolValue], ours = [d[@"ours"] boolValue];
-            if (!alive && !ours) { replyHandler(@{@"stopped": @YES, @"already": @YES}, nil); return; }
-            if (!ours) {
-                replyHandler(nil, [NSString stringWithFormat:
-                    @"端口 %d 上的实例不是本启动器拉起的，请到对应终端自行停止，以免误杀。", kDshPort]);
-                return;
-            }
-            [pm stopManaged];
-            replyHandler(@{@"stopped": @YES}, nil);
-        } else if ([cmd isEqualToString:@"logs"]) {
-            replyHandler(@{@"lines": [pm tail:180]}, nil);
-        } else if ([cmd isEqualToString:@"autostart-status"]) {
-            BOOL on = (SMAppService.mainAppService.status == SMAppServiceStatusEnabled);
-            replyHandler(@{@"enabled": @(on)}, nil);
-        } else if ([cmd isEqualToString:@"autostart"]) {
-            BOOL enable = [payload[@"enable"] boolValue];
-            NSError *e = nil;
-            BOOL ok = enable ? [SMAppService.mainAppService registerAndReturnError:&e]
-                             : [SMAppService.mainAppService unregisterAndReturnError:&e];
-            if (!ok) replyHandler(nil, e.localizedDescription ?: @"设置失败");
-            else replyHandler(@{@"enabled": @(enable)}, nil);
-        } else if ([cmd isEqualToString:@"install-status"]) {
-            replyHandler(@{@"installed": @([NSBundle.mainBundle.bundlePath hasPrefix:@"/Applications/"]),
-                          @"path": NSBundle.mainBundle.bundlePath}, nil);
-        } else if ([cmd isEqualToString:@"install"]) {
-            NSString *dst = [[NSProcessInfo processInfo] environment][@"DSH_LAUNCHER_INSTALL_DST"]
-                            ?: @"/Applications/DeepSeek Harness 启动台.app";
-            NSString *noRelaunch = [[NSProcessInfo processInfo] environment][@"DSH_LAUNCHER_NO_RELAUNCH"];
-            BOOL relaunch = noRelaunch.length == 0;
-            replyHandler(InstallAppTo(dst, relaunch), nil);
-        } else if ([cmd isEqualToString:@"update-check"]) {
-            NSDictionary *info = NpxDshInfo();
-            FetchLatestDshVersion(^(NSString *latest, NSString *err) {
-                if (err) replyHandler(nil, [@"检查更新失败: " stringByAppendingString:err]);
-                else replyHandler(@{@"current": info[@"version"] ?: @"",
-                                   @"latest": latest,
-                                   @"dirs": info[@"dirs"]}, nil);
-            });
-        } else if ([cmd isEqualToString:@"update-apply"]) {
-            NSArray<NSString *> *dirs = payload[@"dirs"] ?: @[];
-            __block NSInteger removed = 0;
-            for (NSString *dir in dirs) {
-                if ([dir hasPrefix:[@"~/.npm/_npx" stringByExpandingTildeInPath]]
-                    && [[NSFileManager defaultManager] removeItemAtPath:dir error:nil]) removed++;
-            }
-            AppLog([NSString stringWithFormat:@"更新：清理 npx 缓存 %ld 处", (long)removed]);
-            replyHandler(@{@"ok": @(removed > 0), @"removed": @(removed)}, nil);
-        } else {
-            replyHandler(nil, [@"unknown cmd " stringByAppendingString:cmd ?: @""]);
-        }
+        NSString *err = nil;
+        NSDictionary *r = [BridgeVC executeCmd:cmd payload:payload error:&err];
+        if (err) replyHandler(nil, err);
+        else replyHandler(r, nil);
     });
+}
+
+// 所有界面指令的单一入口（App 桥接与 --bridge-test 共用）
++ (NSDictionary *)executeCmd:(NSString *)cmd payload:(NSDictionary *)payload error:(NSString **)err {
+    ProcMan *pm = ProcMan.shared;
+
+    if ([cmd isEqualToString:@"status"]) {
+        return [pm statusDict];
+    }
+    if ([cmd isEqualToString:@"start"]) {
+        BOOL autoOpen = payload[@"autoOpen"] ? [payload[@"autoOpen"] boolValue] : YES;
+        if ([pm probeDsh:1500]) {
+            [pm openBrowser];
+            return @{@"status": @"already-running", @"opened": @YES};
+        }
+        NSString *e = nil;
+        NSDictionary *r = [pm startWithAutoOpen:autoOpen onReady:nil error:&e];
+        if (e) { *err = e; return nil; }
+        return r;
+    }
+    if ([cmd isEqualToString:@"open"]) {
+        if ([pm probeDsh:1500]) { [pm openBrowser]; return @{@"opened": @YES}; }
+        *err = @"dsh web 未在运行";
+        return nil;
+    }
+    if ([cmd isEqualToString:@"stop"]) {
+        NSDictionary *st = [pm statusDict];
+        NSDictionary *d = st[@"dsh"];
+        BOOL alive = [d[@"alive"] boolValue], ours = [d[@"ours"] boolValue];
+        BOOL force = [payload[@"force"] boolValue];
+        if (!alive && !ours) return @{@"stopped": @YES, @"already": @YES};
+        if (ours) {
+            [pm stopManaged];
+            return @{@"stopped": @YES};
+        }
+        if (force) {
+            NSDictionary *r = [pm forceStopByPort:kDshPort];
+            if (r[@"error"]) { *err = r[@"error"]; return nil; }
+            return r;
+        }
+        *err = [NSString stringWithFormat:
+            @"端口 %d 上的实例不是本启动台拉起的。强制停止外部实例需要二次确认（force）。", kDshPort];
+        return nil;
+    }
+    if ([cmd isEqualToString:@"logs"]) {
+        return @{@"lines": [pm tail:180]};
+    }
+    if ([cmd isEqualToString:@"autostart-status"]) {
+        BOOL on = (SMAppService.mainAppService.status == SMAppServiceStatusEnabled);
+        return @{@"enabled": @(on)};
+    }
+    if ([cmd isEqualToString:@"autostart"]) {
+        BOOL enable = [payload[@"enable"] boolValue];
+        NSError *e = nil;
+        BOOL ok = enable ? [SMAppService.mainAppService registerAndReturnError:&e]
+                         : [SMAppService.mainAppService unregisterAndReturnError:&e];
+        if (!ok) { *err = e.localizedDescription ?: @"设置失败"; return nil; }
+        return @{@"enabled": @(enable)};
+    }
+    if ([cmd isEqualToString:@"install-status"]) {
+        return @{@"installed": @([NSBundle.mainBundle.bundlePath hasPrefix:@"/Applications/"]),
+                 @"path": NSBundle.mainBundle.bundlePath};
+    }
+    if ([cmd isEqualToString:@"install"]) {
+        NSString *dst = [[NSProcessInfo processInfo] environment][@"DSH_LAUNCHER_INSTALL_DST"]
+                        ?: @"/Applications/DeepSeek Harness 启动台.app";
+        NSString *noRelaunch = [[NSProcessInfo processInfo] environment][@"DSH_LAUNCHER_NO_RELAUNCH"];
+        return InstallAppTo(dst, noRelaunch.length == 0);
+    }
+    if ([cmd isEqualToString:@"update-check"]) {
+        NSDictionary *info = NpxDshInfo();
+        __block NSString *latest = nil, *lerr = nil;
+        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+        FetchLatestDshVersion(^(NSString *v, NSString *e) {
+            latest = v; lerr = e; dispatch_semaphore_signal(sem);
+        });
+        dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC));
+        if (lerr) { *err = [@"检查更新失败: " stringByAppendingString:lerr]; return nil; }
+        return @{@"current": info[@"version"] ?: @"", @"latest": latest, @"dirs": info[@"dirs"]};
+    }
+    if ([cmd isEqualToString:@"update-apply"]) {
+        NSArray<NSString *> *dirs = payload[@"dirs"] ?: @[];
+        __block NSInteger removed = 0;
+        for (NSString *dir in dirs) {
+            if ([dir hasPrefix:[@"~/.npm/_npx" stringByExpandingTildeInPath]]
+                && [[NSFileManager defaultManager] removeItemAtPath:dir error:nil]) removed++;
+        }
+        AppLog([NSString stringWithFormat:@"更新：清理 npx 缓存 %ld 处", (long)removed]);
+        return @{@"ok": @(removed > 0), @"removed": @(removed)};
+    }
+    *err = [@"unknown cmd " stringByAppendingString:cmd ?: @""];
+    return nil;
 }
 
 @end
@@ -651,6 +713,49 @@ int main(int argc, const char *argv[]) {
         printf("alive=%d ours=%d pid=%s port=%d\n",
                [d[@"alive"] boolValue], [d[@"ours"] boolValue], pidStr.UTF8String, kDshPort);
         return 0;
+    }
+
+    if ([args containsObject:@"--bridge-test"]) {
+        [ProcMan.shared adoptFromPidFile];
+        __block NSInteger pass = 0, fail = 0;
+        void (^check)(NSString *, NSDictionary *, NSString *) = ^(NSString *name, NSDictionary *r, NSString *e) {
+            if (!e) { pass++; printf("[ok]   %-13s %s\n", name.UTF8String, r ? [[r description] UTF8String] : ""); }
+            else    { fail++; printf("[FAIL] %-13s %s\n", name.UTF8String, e.UTF8String); }
+        };
+        NSString *err = nil; NSDictionary *r;
+        r = [BridgeVC executeCmd:@"status" payload:@{} error:&err]; check(@"status", r, err); err = nil;
+        r = [BridgeVC executeCmd:@"update-check" payload:@{} error:&err]; check(@"update-check", r, err); err = nil;
+        r = [BridgeVC executeCmd:@"logs" payload:@{} error:&err]; check(@"logs", r, err); err = nil;
+
+        // 启动→就绪→停止 生命周期（用环境变量的隔离端口，不碰 3080）
+        r = [BridgeVC executeCmd:@"start" payload:@{@"autoOpen": @NO} error:&err];
+        if (!err) {
+            BOOL ready = NO;
+            for (int i = 0; i < 30 && !ready; i++) { [NSThread sleepForTimeInterval:1.0]; ready = [ProcMan.shared probeDsh:800]; }
+            printf("[info] start pid=%s ready=%d\n", [r[@"pid"] stringValue].UTF8String, ready);
+            if (!ready) { fail++; printf("[FAIL] start 就绪超时\n"); }
+            else {
+                r = [BridgeVC executeCmd:@"stop" payload:@{} error:&err];
+                check(@"stop", r, err); err = nil;
+            }
+        } else { check(@"start", nil, err); err = nil; }
+
+        // 外部实例强制停止：起一个无关 http 服务冒充外部进程再按端口强停
+        NSTask *dummy = [NSTask new];
+        dummy.launchPath = @"/usr/bin/python3";
+        dummy.arguments = @[@"-m", @"http.server", @"4892", @"--bind", @"127.0.0.1"];
+        dummy.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+        dummy.standardError = [NSFileHandle fileHandleWithNullDevice];
+        @try { [dummy launch]; } @catch (NSException *e) {}
+        [NSThread sleepForTimeInterval:1.2];
+        NSDictionary *fr = [ProcMan.shared forceStopByPort:4892];
+        [NSThread sleepForTimeInterval:1.5];
+        BOOL dummyDead = ![ProcMan.shared pidByPort:4892];
+        if (![fr objectForKey:@"error"] && dummyDead) { pass++; printf("[ok]   force-stop     pid=%s\n", [fr[@"pid"] stringValue].UTF8String); }
+        else { fail++; printf("[FAIL] force-stop   %@\n", fr); }
+
+        printf("bridge-test: %ld 通过 / %ld 失败\n", (long)pass, (long)fail);
+        return fail ? 1 : 0;
     }
 
     if ([args containsObject:@"--check-update"]) {

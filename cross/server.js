@@ -170,6 +170,47 @@ function killTree(pid) {
   setTimeout(() => { if (pidAlive(pid)) { try { process.kill(-pid, 'SIGKILL'); } catch {} } }, 5000);
 }
 
+function pidByPort(cb) {
+  if (IS_WIN) {
+    execFile('netstat', ['-ano', '-p', 'TCP'], (e, out) => {
+      let pid = null;
+      for (const line of String(out || '').split('\n')) {
+        if (line.includes(':' + DSH_PORT + ' ') && /LISTENING/i.test(line)) {
+          const cols = line.trim().split(/\s+/);
+          const v = Number(cols[cols.length - 1]);
+          if (v > 0) { pid = v; break; }
+        }
+      }
+      cb(pid);
+    });
+  } else {
+    execFile('lsof', ['-nP', `-tiTCP:${DSH_PORT}`, '-sTCP:LISTEN'], (e, out) => {
+      const v = Number(String(out || '').split('\n')[0]);
+      cb(v > 0 ? v : null);
+    });
+  }
+}
+
+function treeOf(pid, cb) {
+  const all = [];
+  (function walk(p, done) {
+    execFile('pgrep', ['-P', String(p)], (e, out) => {
+      const kids = String(out || '').split('\n').map(Number).filter((v) => v > 0);
+      let left = kids.length;
+      if (!left) { all.push(p); return done(); }
+      for (const k of kids) walk(k, () => { if (--left === 0) { all.push(p); done(); } });
+    });
+  })(pid, () => cb(all));
+}
+function killTreeByPid(pid) {
+  if (IS_WIN) { execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => {}); return; }
+  treeOf(pid, (tree) => {
+    for (const t of tree) { if (t !== pid) { try { process.kill(t, 'SIGTERM'); } catch {} } }
+    try { process.kill(pid, 'SIGTERM'); } catch {}
+    setTimeout(() => { for (const t of tree) { try { process.kill(t, 0); process.kill(t, 'SIGKILL'); } catch {} } }, 5000);
+  });
+}
+
 function stopDsh() {
   if (!child || !pidAlive(child.pid)) { child = null; return { ok: true, already: true }; }
   log(`停止 dsh web（pid ${child.pid}）…`);
@@ -292,11 +333,19 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && url.pathname === '/api/stop') {
     const st = await buildStatus();
     if (!st.dsh.alive && !(child && pidAlive(child.pid))) return send(200, { stopped: true, already: true });
-    if (!st.dsh.ours) {
-      return send(409, { error: `端口 ${DSH_PORT} 上的实例不是本启动器拉起的，请到对应终端自行停止，以免误杀。` });
+    if (st.dsh.ours) {
+      stopDsh();
+      return send(200, { stopped: true });
     }
-    stopDsh();
-    return send(200, { stopped: true });
+    if (json.force) {
+      return pidByPort((pid) => {
+        if (!pid) return send(409, { error: `端口 ${DSH_PORT} 上没有发现进程` });
+        log(`强制停止外部实例 pid=${pid}（端口 ${DSH_PORT}）`);
+        killTreeByPid(pid);
+        return send(200, { stopped: true, forced: true, pid });
+      });
+    }
+    return send(409, { error: `端口 ${DSH_PORT} 上的实例不是本启动台拉起的。强制停止外部实例需要二次确认（force）。` });
   }
   if (req.method === 'POST' && url.pathname === '/api/update-apply') {
     const dirs = Array.isArray(json.dirs) ? json.dirs : [];
