@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DeepSeek Harness 启动台
+Name[en]=DSH Launcher
+Comment=一键拉起 DeepSeek dsh web 界面
+Comment[en]=One-click launcher for the DeepSeek dsh web UI
+Exec=bash -c '"%REPLACE_ME%/start.sh"'
+Icon=%REPLACE_ME%/icon.svg
+Terminal=false
+Categories=Development;Utility;
+StartupWMClass=dsh-launcher

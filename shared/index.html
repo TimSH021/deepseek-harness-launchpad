@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeepSeek Harness 启动台</title>
+<style>
+:root{
+  --bg0:#02060f; --bg1:#071a30;
+  --cyan:#3af0cf; --blue:#4d9dff; --amber:#ffb454; --red:#ff5d73;
+  --ink:#e8f4ff; --ink-dim:#8fb2d4; --ink-faint:#5b7a99;
+  --glass:rgba(12,28,54,.58); --line:rgba(130,215,255,.15);
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:"PingFang SC","Hiragino Sans GB",-apple-system,"Helvetica Neue","Microsoft YaHei",sans-serif;
+  color:var(--ink);
+  background:radial-gradient(1200px 800px at 78% -10%,#0b2748 0%,transparent 55%),
+             radial-gradient(1000px 700px at -10% 108%,#0a3f3a 0%,transparent 55%),
+             linear-gradient(160deg,var(--bg1) 0%,var(--bg0) 70%);
+  min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;padding-top:28px; /* 让出红绿灯标题栏（App 模式） */
+}
+
+/* ---------- 粒子画布 ---------- */
+#fx{position:fixed;inset:0;z-index:0;pointer-events:none}
+.top,.wrap,.foot{position:relative;z-index:1}
+
+/* ---------- 顶栏 ---------- */
+.top{display:flex;align-items:center;justify-content:space-between;
+  padding:12px clamp(20px,4vw,42px) 0;animation:fadeDown .7s cubic-bezier(.2,.7,.2,1) both}
+.brand{display:flex;align-items:center;gap:12px;font-weight:700;letter-spacing:.04em}
+.brand svg{width:34px;height:34px;flex:none;filter:drop-shadow(0 0 10px rgba(58,240,207,.45))}
+.brand em{font-style:normal;color:var(--ink-dim);font-weight:500}
+.pill{display:flex;align-items:center;gap:8px;font-size:13px;padding:7px 14px;border-radius:999px;
+  background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(14px);
+  color:var(--ink-dim);font-family:var(--mono);letter-spacing:.05em}
+.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--ink-faint);transition:all .3s}
+.pill[data-s="run"]{color:#9df3dd;border-color:rgba(58,240,207,.35)}
+.pill[data-s="run"] .dot{background:var(--cyan);box-shadow:0 0 10px var(--cyan)}
+.pill[data-s="start"]{color:#ffd9a3;border-color:rgba(255,180,84,.35)}
+.pill[data-s="start"] .dot{background:var(--amber);box-shadow:0 0 10px var(--amber);animation:blink 1s steps(2) infinite}
+.pill[data-s="stop"]{color:#eab3bd;border-color:rgba(255,93,115,.25)}
+.pill[data-s="stop"] .dot{background:var(--red);opacity:.8}
+@keyframes blink{50%{opacity:.25}}
+
+/* ---------- 主体卡片 ---------- */
+.wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:26px 18px 20px}
+.card{width:min(760px,94vw);background:var(--glass);border:1px solid var(--line);border-radius:30px;
+  backdrop-filter:blur(26px) saturate(150%);-webkit-backdrop-filter:blur(26px) saturate(150%);
+  box-shadow:0 30px 80px rgba(0,4,14,.55), inset 0 1px 0 rgba(190,235,255,.08);
+  padding:clamp(26px,4vw,46px) clamp(24px,5vw,56px) clamp(22px,4vw,32px);
+  display:flex;flex-direction:column;align-items:center;text-align:center;
+  animation:fadeUp .8s cubic-bezier(.2,.7,.2,1) .12s both}
+.card>*{animation:fadeUp .7s cubic-bezier(.2,.7,.2,1) both}
+.card>*:nth-child(2){animation-delay:.2s}.card>*:nth-child(3){animation-delay:.28s}
+.card>*:nth-child(4){animation-delay:.36s}.card>*:nth-child(5){animation-delay:.44s}
+.card>*:nth-child(6){animation-delay:.5s}.card>*:nth-child(7){animation-delay:.56s}
+
+/* 状态球（呼吸灯） */
+.orb{position:relative;width:172px;height:172px;display:grid;place-items:center;margin-bottom:26px}
+.orb .ring{position:absolute;inset:0;border-radius:50%;
+  background:conic-gradient(from 0deg,transparent 0 62%,rgba(58,240,207,.9) 82%,transparent 100%);
+  -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 3px));
+          mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 3px));
+  opacity:0;transition:opacity .5s}
+.orb .core{width:132px;height:132px;border-radius:50%;display:grid;place-items:center;
+  background:radial-gradient(circle at 32% 28%,#123455 0%,#081c33 58%,#050f1e 100%);
+  border:1px solid rgba(140,215,255,.2);
+  box-shadow:inset 0 0 34px rgba(20,60,90,.7), 0 0 0 rgba(58,240,207,0);
+  transition:box-shadow .6s,border-color .6s}
+.orb .core svg{width:66px;height:66px;opacity:.5;transition:opacity .6s,filter .6s}
+/* 呼吸扩散环 */
+.orb .pulse{position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(58,240,207,.55);
+  opacity:0;display:none;pointer-events:none}
+.orb[data-s="run"] .ring{opacity:1;animation:spin 2.6s linear infinite}
+.orb[data-s="run"] .core{border-color:rgba(58,240,207,.5);animation:breath 3.2s ease-in-out infinite;
+  box-shadow:inset 0 0 34px rgba(20,90,80,.8), 0 0 46px rgba(58,240,207,.28)}
+.orb[data-s="run"] .core svg{opacity:1;filter:drop-shadow(0 0 12px rgba(58,240,207,.75))}
+.orb[data-s="run"] .pulse{display:block;animation:pulse 3.6s ease-out infinite}
+.orb[data-s="run"] .p2{animation-delay:1.2s}
+.orb[data-s="run"] .p3{animation-delay:2.4s}
+.orb[data-s="start"] .ring{opacity:.9;animation:spin 1.1s linear infinite;
+  background:conic-gradient(from 0deg,transparent 0 70%,rgba(255,180,84,.95) 90%,transparent 100%)}
+.orb[data-s="start"] .pulse{display:block;border-color:rgba(255,180,84,.5);animation:pulse 1.8s ease-out infinite}
+.orb[data-s="start"] .p2{animation-delay:.6s}
+.orb[data-s="start"] .p3{animation-delay:1.2s}
+.orb[data-s="start"] .core{border-color:rgba(255,180,84,.45);animation:breath 1.3s ease-in-out infinite}
+.orb[data-s="start"] .core svg{opacity:.85;filter:drop-shadow(0 0 10px rgba(255,180,84,.6))}
+.orb[data-s="stop"] .core svg{opacity:.35;filter:grayscale(.6)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes breath{50%{transform:scale(1.045)}}
+@keyframes pulse{0%{transform:scale(.72);opacity:0}12%{opacity:.55}100%{transform:scale(1.8);opacity:0}}
+
+h1{font-size:clamp(30px,5vw,44px);font-weight:800;letter-spacing:.01em;line-height:1.15}
+h1 span{background:linear-gradient(100deg,var(--cyan),var(--blue));
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;padding-right:.06em}
+.sub{margin-top:10px;color:var(--ink-dim);font-size:14.5px;letter-spacing:.14em}
+
+/* 地址胶囊 */
+.url{margin-top:26px;display:inline-flex;align-items:center;gap:10px;cursor:pointer;
+  font-family:var(--mono);font-size:14.5px;color:#bfe9de;letter-spacing:.03em;
+  padding:11px 20px;border-radius:999px;background:rgba(4,14,26,.66);
+  border:1px dashed rgba(120,220,200,.3);transition:border-color .25s,transform .25s}
+.url:hover{border-color:rgba(58,240,207,.65);transform:translateY(-1px)}
+.url svg{width:15px;height:15px;opacity:.7}
+.url .copy{font-size:12px;color:var(--ink-faint);
+  border-left:1px solid rgba(120,220,200,.25);padding-left:12px;margin-left:2px;transition:color .25s}
+.url:hover .copy{color:var(--cyan)}
+
+/* 按钮 */
+.actions{margin-top:30px;display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+.btn{appearance:none;cursor:pointer;font-family:inherit;font-size:15px;font-weight:600;
+  padding:0 30px;height:52px;border-radius:999px;letter-spacing:.06em;
+  transition:transform .22s cubic-bezier(.2,.7,.2,1),box-shadow .22s,filter .22s,opacity .3s}
+.btn:active{transform:translateY(1px) scale(.985)}
+.btn.primary{border:none;color:#03121d;
+  background:linear-gradient(135deg,#43f2cd 0%,#3f8cff 100%);
+  box-shadow:0 10px 34px rgba(62,200,255,.3), inset 0 1px 0 rgba(255,255,255,.4);
+  min-width:200px}
+.btn.primary:hover:not(:disabled){transform:translateY(-2px);filter:brightness(1.1);
+  box-shadow:0 16px 44px rgba(62,230,255,.42), inset 0 1px 0 rgba(255,255,255,.4)}
+.btn.primary:disabled{opacity:.55;cursor:default}
+.btn.ghost{background:transparent;color:#c3dcf5;border:1px solid rgba(140,190,255,.24)}
+.btn.ghost:hover:not(:disabled){transform:translateY(-2px);border-color:rgba(160,210,255,.5);color:#fff}
+.btn.ghost.danger:hover:not(:disabled){border-color:rgba(255,93,115,.55);color:#ffb9c4;
+  box-shadow:0 8px 26px rgba(255,93,115,.15)}
+.btn:disabled{opacity:.38;cursor:not-allowed}
+
+/* 元信息 */
+.meta{margin-top:30px;width:100%;display:flex;flex-wrap:wrap;gap:10px 26px;justify-content:center;
+  font-size:12.5px;color:var(--ink-faint);letter-spacing:.08em}
+.meta b{color:var(--ink-dim);font-family:var(--mono);font-weight:500;margin-left:4px}
+.switch{display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none}
+.switch input{display:none}
+.switch i{width:30px;height:17px;border-radius:999px;background:rgba(60,90,130,.5);
+  position:relative;transition:background .25s;font-style:normal}
+.switch i::after{content:"";position:absolute;top:2.5px;left:3px;width:12px;height:12px;border-radius:50%;
+  background:#cfe4f6;transition:transform .25s}
+.switch input:checked + i{background:rgba(58,240,207,.55)}
+.switch input:checked + i::after{transform:translateX(12px);background:var(--cyan)}
+
+/* 安装 / 更新 / 自启 */
+.setup{margin-top:20px;width:100%;display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;justify-content:center;
+  padding-top:16px;border-top:1px dashed rgba(130,215,255,.14)}
+.chip{appearance:none;cursor:pointer;font-family:inherit;font-size:12.5px;letter-spacing:.05em;
+  padding:8px 16px;border-radius:999px;background:transparent;color:#c3dcf5;
+  border:1px solid rgba(140,190,255,.22);transition:all .2s}
+.chip:hover:not(:disabled){transform:translateY(-1px);border-color:rgba(58,240,207,.5);color:#bfeee2}
+.chip:disabled{opacity:.45;cursor:default}
+.ver{font-family:var(--mono);font-size:12px;color:var(--ink-faint);letter-spacing:.03em}
+.apponly{display:inline-flex;gap:10px;align-items:center}
+html.web .apponly{display:none}
+
+/* 日志 */
+.logs{margin-top:26px;width:100%;border-top:1px dashed rgba(130,215,255,.16);padding-top:18px;text-align:left}
+.logbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;
+  font-size:12px;color:var(--ink-faint);letter-spacing:.14em}
+.logbar button{appearance:none;background:none;border:none;color:var(--ink-faint);cursor:pointer;
+  font-size:12px;font-family:inherit;letter-spacing:.1em}
+.logbar button:hover{color:var(--cyan)}
+#logOut{max-height:230px;overflow:auto;background:rgba(2,8,18,.75);border:1px solid rgba(120,215,255,.1);
+  border-radius:14px;padding:14px 16px;font-family:var(--mono);font-size:12px;line-height:1.75;
+  color:#9fd8cc;white-space:pre-wrap;word-break:break-all}
+#logOut .e{color:#ff9aa8}
+#logOut::-webkit-scrollbar{width:8px}
+#logOut::-webkit-scrollbar-thumb{background:rgba(120,200,255,.18);border-radius:4px}
+
+.foot{padding:14px;text-align:center;font-size:12px;color:var(--ink-faint);letter-spacing:.12em;
+  animation:fadeUp .7s .55s both}
+
+/* Toast */
+.toast{position:fixed;top:20px;right:20px;z-index:9;pointer-events:none;
+  background:rgba(8,22,40,.92);border:1px solid var(--line);border-left:3px solid var(--cyan);
+  color:var(--ink);font-size:13.5px;padding:13px 20px;border-radius:12px;max-width:min(380px,86vw);
+  box-shadow:0 16px 44px rgba(0,4,14,.5);backdrop-filter:blur(16px);
+  opacity:0;transform:translateX(14px);transition:opacity .35s,transform .35s}
+.toast.show{opacity:1;transform:none}
+.toast.err{border-left-color:var(--red)}
+
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+@keyframes fadeDown{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media (max-width:520px){.orb{width:140px;height:140px}.orb .core{width:106px;height:106px}
+  .orb .core svg{width:52px;height:52px}.btn{height:48px;padding:0 22px}}
+</style>
+</head>
+<body>
+<canvas id="fx"></canvas>
+
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 50 50" aria-hidden="true">
+      <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#3af0cf"/><stop offset="1" stop-color="#4d9dff"/></linearGradient></defs>
+      <path d="M48.8354 10.0479C48.3232 9.79199 48.1025 10.2798 47.8032 10.5278C47.7007 10.6079 47.6143 10.7119 47.5273 10.8076C46.7793 11.624 45.9048 12.1597 44.7622 12.0957C43.0923 12 41.666 12.5356 40.4058 13.8398C40.1377 12.2319 39.2476 11.272 37.8926 10.6558C37.1836 10.3359 36.4668 10.0156 35.9702 9.31982C35.6235 8.82373 35.5293 8.27197 35.356 7.72754C35.2456 7.3999 35.1353 7.06396 34.7651 7.00781C34.3633 6.94385 34.2056 7.2876 34.0479 7.57568C33.418 8.75195 33.1733 10.0479 33.1973 11.3599C33.2524 14.312 34.4736 16.6641 36.8999 18.3359C37.1758 18.5278 37.2466 18.7197 37.1597 19C36.9946 19.5757 36.7974 20.1357 36.624 20.7119C36.5137 21.0801 36.3486 21.1597 35.9624 21C34.6309 20.4321 33.481 19.5918 32.4644 18.5757C30.7393 16.8721 29.1792 14.9917 27.2334 13.52C26.7764 13.1758 26.3193 12.856 25.8467 12.5518C23.8618 10.584 26.1069 8.96777 26.627 8.77588C27.1704 8.57568 26.8159 7.8877 25.0591 7.896C23.3022 7.90381 21.6953 8.50391 19.647 9.30371C19.3477 9.42383 19.0322 9.51172 18.7095 9.58398C16.8501 9.22363 14.9199 9.14355 12.9033 9.37598C9.10596 9.80762 6.07275 11.6396 3.84326 14.7681C1.16455 18.5278 0.53418 22.7998 1.30664 27.2559C2.11768 31.9521 4.46582 35.8398 8.07373 38.8799C11.8159 42.0322 16.1255 43.5762 21.041 43.2803C24.0269 43.104 27.3516 42.6963 31.1016 39.4561C32.0469 39.936 33.0396 40.1279 34.686 40.272C35.9546 40.3921 37.1758 40.208 38.1211 40.0078C39.6021 39.688 39.4995 38.2881 38.9639 38.0322C34.623 35.9678 35.5762 36.8081 34.71 36.1279C36.9155 33.4639 40.2402 30.6958 41.54 21.728C41.6426 21.0161 41.5557 20.5679 41.54 19.9917C41.5322 19.6396 41.6108 19.5039 42.0049 19.4639C43.0923 19.3359 44.1479 19.0317 45.1167 18.4878C47.9292 16.9199 49.064 14.3438 49.3315 11.2559C49.3711 10.7837 49.3237 10.2959 48.8354 10.0479ZM24.3262 37.8398C20.1196 34.4639 18.0791 33.3521 17.2358 33.3999C16.4482 33.4482 16.5898 34.3682 16.7632 34.9678C16.9443 35.5601 17.1812 35.9683 17.5117 36.4878C17.7402 36.832 17.8979 37.3442 17.2832 37.728C15.9282 38.584 13.5728 37.4399 13.4624 37.3838C10.7207 35.7358 8.42822 33.5601 6.81348 30.584C5.25342 27.7197 4.34766 24.6479 4.19775 21.3677C4.1582 20.5757 4.38672 20.2959 5.15869 20.1519C6.17529 19.96 7.22314 19.9199 8.23926 20.0718C12.5327 20.7119 16.1885 22.6719 19.2529 25.7759C21.002 27.5439 22.3252 29.6558 23.6885 31.7202C25.1377 33.9121 26.6978 36 28.6831 37.7119C29.3843 38.312 29.9434 38.7681 30.479 39.104C28.8643 39.2881 26.1699 39.3281 24.3262 37.8398ZM26.3433 24.6001C26.3433 24.248 26.6191 23.9678 26.9658 23.9678C27.0444 23.9678 27.1152 23.9839 27.1782 24.0078C27.2651 24.04 27.3438 24.0879 27.4067 24.1602C27.5171 24.272 27.5801 24.4321 27.5801 24.6001C27.5801 24.9521 27.3042 25.2319 26.9575 25.2319C26.6108 25.2319 26.3433 24.9521 26.3433 24.6001ZM32.6064 27.8799C32.2046 28.0479 31.8027 28.1919 31.4165 28.208C30.8179 28.2397 30.1641 27.9922 29.8096 27.688C29.2583 27.2158 28.8643 26.9521 28.6987 26.1279C28.6279 25.7759 28.6675 25.2319 28.7305 24.9199C28.8721 24.248 28.7144 23.8159 28.2495 23.4238C27.8716 23.104 27.3911 23.0161 26.8633 23.0161C26.666 23.0161 26.4849 22.9277 26.3511 22.856C26.1304 22.7441 25.9492 22.4639 26.1226 22.1201C26.1777 22.0078 26.4458 21.7358 26.5088 21.688C27.2256 21.272 28.0527 21.4077 28.8169 21.7197C29.5259 22.0161 30.0615 22.5601 30.834 23.3281C31.6216 24.2559 31.7632 24.5117 32.2124 25.208C32.5669 25.752 32.8901 26.312 33.1104 26.9521C33.2446 27.3521 33.0713 27.6802 32.6064 27.8799Z" fill="url(#lg)"/>
+    </svg>
+    <span>DeepSeek Harness <em>启动台</em></span>
+  </div>
+  <div class="pill" id="statePill" data-s="stop"><i class="dot"></i><span id="stateText">检测中…</span></div>
+</header>
+
+<main class="wrap">
+  <section class="card">
+    <div class="orb" id="orb" data-s="stop">
+      <div class="pulse p1"></div><div class="pulse p2"></div><div class="pulse p3"></div>
+      <div class="ring"></div>
+      <div class="core">
+        <svg viewBox="0 0 50 50" aria-hidden="true">
+          <defs><linearGradient id="wg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#5cf6d8"/><stop offset="1" stop-color="#4d9dff"/></linearGradient></defs>
+          <path d="M48.8354 10.0479C48.3232 9.79199 48.1025 10.2798 47.8032 10.5278C47.7007 10.6079 47.6143 10.7119 47.5273 10.8076C46.7793 11.624 45.9048 12.1597 44.7622 12.0957C43.0923 12 41.666 12.5356 40.4058 13.8398C40.1377 12.2319 39.2476 11.272 37.8926 10.6558C37.1836 10.3359 36.4668 10.0156 35.9702 9.31982C35.6235 8.82373 35.5293 8.27197 35.356 7.72754C35.2456 7.3999 35.1353 7.06396 34.7651 7.00781C34.3633 6.94385 34.2056 7.2876 34.0479 7.57568C33.418 8.75195 33.1733 10.0479 33.1973 11.3599C33.2524 14.312 34.4736 16.6641 36.8999 18.3359C37.1758 18.5278 37.2466 18.7197 37.1597 19C36.9946 19.5757 36.7974 20.1357 36.624 20.7119C36.5137 21.0801 36.3486 21.1597 35.9624 21C34.6309 20.4321 33.481 19.5918 32.4644 18.5757C30.7393 16.8721 29.1792 14.9917 27.2334 13.52C26.7764 13.1758 26.3193 12.856 25.8467 12.5518C23.8618 10.584 26.1069 8.96777 26.627 8.77588C27.1704 8.57568 26.8159 7.8877 25.0591 7.896C23.3022 7.90381 21.6953 8.50391 19.647 9.30371C19.3477 9.42383 19.0322 9.51172 18.7095 9.58398C16.8501 9.22363 14.9199 9.14355 12.9033 9.37598C9.10596 9.80762 6.07275 11.6396 3.84326 14.7681C1.16455 18.5278 0.53418 22.7998 1.30664 27.2559C2.11768 31.9521 4.46582 35.8398 8.07373 38.8799C11.8159 42.0322 16.1255 43.5762 21.041 43.2803C24.0269 43.104 27.3516 42.6963 31.1016 39.4561C32.0469 39.936 33.0396 40.1279 34.686 40.272C35.9546 40.3921 37.1758 40.208 38.1211 40.0078C39.6021 39.688 39.4995 38.2881 38.9639 38.0322C34.623 35.9678 35.5762 36.8081 34.71 36.1279C36.9155 33.4639 40.2402 30.6958 41.54 21.728C41.6426 21.0161 41.5557 20.5679 41.54 19.9917C41.5322 19.6396 41.6108 19.5039 42.0049 19.4639C43.0923 19.3359 44.1479 19.0317 45.1167 18.4878C47.9292 16.9199 49.064 14.3438 49.3315 11.2559C49.3711 10.7837 49.3237 10.2959 48.8354 10.0479ZM24.3262 37.8398C20.1196 34.4639 18.0791 33.3521 17.2358 33.3999C16.4482 33.4482 16.5898 34.3682 16.7632 34.9678C16.9443 35.5601 17.1812 35.9683 17.5117 36.4878C17.7402 36.832 17.8979 37.3442 17.2832 37.728C15.9282 38.584 13.5728 37.4399 13.4624 37.3838C10.7207 35.7358 8.42822 33.5601 6.81348 30.584C5.25342 27.7197 4.34766 24.6479 4.19775 21.3677C4.1582 20.5757 4.38672 20.2959 5.15869 20.1519C6.17529 19.96 7.22314 19.9199 8.23926 20.0718C12.5327 20.7119 16.1885 22.6719 19.2529 25.7759C21.002 27.5439 22.3252 29.6558 23.6885 31.7202C25.1377 33.9121 26.6978 36 28.6831 37.7119C29.3843 38.312 29.9434 38.7681 30.479 39.104C28.8643 39.2881 26.1699 39.3281 24.3262 37.8398ZM26.3433 24.6001C26.3433 24.248 26.6191 23.9678 26.9658 23.9678C27.0444 23.9678 27.1152 23.9839 27.1782 24.0078C27.2651 24.04 27.3438 24.0879 27.4067 24.1602C27.5171 24.272 27.5801 24.4321 27.5801 24.6001C27.5801 24.9521 27.3042 25.2319 26.9575 25.2319C26.6108 25.2319 26.3433 24.9521 26.3433 24.6001ZM32.6064 27.8799C32.2046 28.0479 31.8027 28.1919 31.4165 28.208C30.8179 28.2397 30.1641 27.9922 29.8096 27.688C29.2583 27.2158 28.8643 26.9521 28.6987 26.1279C28.6279 25.7759 28.6675 25.2319 28.7305 24.9199C28.8721 24.248 28.7144 23.8159 28.2495 23.4238C27.8716 23.104 27.3911 23.0161 26.8633 23.0161C26.666 23.0161 26.4849 22.9277 26.3511 22.856C26.1304 22.7441 25.9492 22.4639 26.1226 22.1201C26.1777 22.0078 26.4458 21.7358 26.5088 21.688C27.2256 21.272 28.0527 21.4077 28.8169 21.7197C29.5259 22.0161 30.0615 22.5601 30.834 23.3281C31.6216 24.2559 31.7632 24.5117 32.2124 25.208C32.5669 25.752 32.8901 26.312 33.1104 26.9521C33.2446 27.3521 33.0713 27.6802 32.6064 27.8799Z" fill="url(#wg)"/>
+        </svg>
+      </div>
+    </div>
+    <h1>DeepSeek <span>Web</span></h1>
+    <p class="sub">本地智能体工作台 · 一键拉起</p>
+    <button class="url" id="urlBtn" title="点击复制地址">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M10 14a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07L11.5 5.4"/>
+        <path d="M14 10a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.47"/>
+      </svg>
+      <code id="urlText">http://127.0.0.1:3080</code>
+      <span class="copy">复制</span>
+    </button>
+    <div class="actions">
+      <button class="btn primary" id="mainBtn">启动 DeepSeek</button>
+      <button class="btn ghost danger" id="stopBtn" disabled>停止</button>
+      <button class="btn ghost" id="logBtn">日志 ▾</button>
+    </div>
+    <div class="meta">
+      <span>端口<b id="mPort">3080</b></span>
+      <span>已运行<b id="mUptime">—</b></span>
+      <span>进程<b id="mProc">—</b></span>
+      <label class="switch" title="dsh 就绪后自动在浏览器打开界面">
+        <input type="checkbox" id="autoOpen"><i></i><span>就绪后自动打开浏览器</span>
+      </label>
+    </div>
+    <div class="setup">
+      <span class="apponly">
+        <label class="switch" title="登录 macOS 后自动打开启动器">
+          <input type="checkbox" id="autoStart"><i></i><span>开机自启</span>
+        </label>
+        <button class="chip" id="installBtn">一键安装到「应用程序」</button>
+      </span>
+      <button class="chip" id="updBtn">检查更新</button>
+      <span class="ver" id="verText"></span>
+    </div>
+    <section class="logs" id="logsPanel" hidden>
+      <div class="logbar"><span>DSH 实时输出</span><button id="clearLog">清空</button></div>
+      <pre id="logOut">（暂无输出）</pre>
+    </section>
+  </section>
+</main>
+
+<footer class="foot" id="foot">DeepSeek Harness 启动台 · dsh 运行于 127.0.0.1:3080 · 界面在浏览器中打开</footer>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const orb = $('orb'), pill = $('statePill'), pillText = $('stateText'),
+      mainBtn = $('mainBtn'), stopBtn = $('stopBtn'), logBtn = $('logBtn'),
+      logsPanel = $('logsPanel'), logOut = $('logOut'), toast = $('toast');
+
+/* ---------- 双模式桥接：App(WKWebView) 或 浏览器(本地服务) ---------- */
+const hasBridge = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.bridge);
+document.documentElement.classList.add(hasBridge ? 'app' : 'web');
+if (!hasBridge) $('foot').textContent = 'DeepSeek Harness 启动台 · 跨平台版（macOS / Linux / Windows）· dsh 运行于 127.0.0.1:3080';
+
+async function api(cmd, body) {
+  if (hasBridge) return window.webkit.messageHandlers.bridge.postMessage({ cmd, body: body || {} });
+  const res = await fetch('/api/' + cmd, body ? {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  } : undefined);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+let st = null, logsOpen = false, toastTimer = null;
+
+/* ---------- 工具 ---------- */
+function showToast(msg, err) {
+  toast.textContent = msg;
+  toast.classList.toggle('err', !!err);
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), 3200);
+}
+function fmtDur(ms) {
+  if (!ms || ms < 0) return '—';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return s + ' 秒';
+  const m = Math.floor(s / 60), h = Math.floor(m / 60), d = Math.floor(h / 24);
+  if (h < 1) return m + ' 分 ' + (s % 60) + ' 秒';
+  if (d < 1) return h + ' 时 ' + (m % 60) + ' 分';
+  return d + ' 天 ' + (h % 24) + ' 时';
+}
+
+/* ---------- 状态渲染 ---------- */
+function stateOf(s) {
+  if (s.dsh.alive) return s.dsh.ours ? 'run-ours' : 'run-external';
+  if (s.dsh.ours) return 'starting';
+  return 'stopped';
+}
+function render() {
+  if (!st) return;
+  const k = stateOf(st), d = st.dsh;
+  $('urlText').textContent = d.url;
+  $('mPort').textContent = d.port;
+
+  const map = {
+    'run-ours':      ['run',   '运行中 · 启动器托管'],
+    'run-external':  ['run',   '运行中 · 外部进程'],
+    'starting':      ['start', '启动中…'],
+    'stopped':       ['stop',  '未运行'],
+  };
+  const [ps, label] = map[k];
+  pill.dataset.s = ps; pillText.textContent = label;
+  orb.dataset.s = ps;
+  window.__fxMode = ps;
+
+  mainBtn.disabled = k === 'starting';
+  mainBtn.textContent = (k === 'run-ours' || k === 'run-external') ? '打开界面'
+                        : k === 'starting' ? '启动中…' : '启动 DeepSeek';
+  stopBtn.disabled = !(k === 'run-ours' || k === 'starting');
+
+  $('mProc').textContent = k === 'run-ours' ? '#' + d.pid + (d.adopted ? ' · 已认领' : '')
+                          : k === 'run-external' ? '外部进程'
+                          : k === 'starting' ? '#' + d.pid : '—';
+  $('mUptime').textContent = (k === 'run-ours' && d.startedAt) ? fmtDur(Date.now() - d.startedAt) : '—';
+}
+
+async function refresh() {
+  try { st = await api('status'); render(); }
+  catch (e) {
+    pill.dataset.s = 'stop'; pillText.textContent = hasBridge ? '桥接失联' : '服务失联';
+    window.__fxMode = 'stop';
+  }
+}
+setInterval(refresh, 1500);
+setInterval(() => { if (st && st.dsh.startedAt && stateOf(st) === 'run-ours') $('mUptime').textContent = fmtDur(Date.now() - st.dsh.startedAt); }, 1000);
+
+/* ---------- 动作 ---------- */
+mainBtn.addEventListener('click', async () => {
+  mainBtn.disabled = true;
+  try {
+    if (st && st.dsh.alive) await api('open');
+    else {
+      const r = await api('start', { autoOpen: $('autoOpen').checked });
+      showToast(r.status === 'already-running' ? '已在运行，正在打开界面' : '正在启动 dsh web…');
+    }
+  } catch (e) { showToast(String(e.message || e), true); }
+  refresh();
+});
+
+stopBtn.addEventListener('click', async () => {
+  stopBtn.disabled = true;
+  try { await api('stop'); showToast('已发送停止信号'); }
+  catch (e) { showToast(String(e.message || e), true); }
+  refresh();
+});
+
+$('urlBtn').addEventListener('click', async () => {
+  const url = $('urlText').textContent;
+  try { await navigator.clipboard.writeText(url); showToast('已复制 ' + url); }
+  catch { showToast('复制失败，请手动选择', true); }
+});
+
+$('autoOpen').checked = localStorage.getItem('dsh.autoOpen') !== '0';
+$('autoOpen').addEventListener('change', (e) => {
+  localStorage.setItem('dsh.autoOpen', e.target.checked ? '1' : '0');
+});
+
+/* ---------- 日志 ---------- */
+function toggleLogs(open) {
+  logsOpen = open === undefined ? !logsOpen : open;
+  logsPanel.hidden = !logsOpen;
+  logBtn.textContent = logsOpen ? '日志 ▴' : '日志 ▾';
+  if (logsOpen) pullLogs();
+}
+logBtn.addEventListener('click', () => toggleLogs());
+$('clearLog').addEventListener('click', () => { logOut.textContent = '（已清空显示）'; });
+
+let logBusy = false;
+async function pullLogs() {
+  if (!logsOpen || logBusy) return;
+  logBusy = true;
+  try {
+    const r = await api('logs');
+    if (r.lines && r.lines.length) {
+      const atBottom = logOut.scrollHeight - logOut.scrollTop - logOut.clientHeight < 40;
+      logOut.innerHTML = r.lines.map((l) =>
+        l.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+         .replace(/\[([^\]]*err[^\]]*)\]/gi, '[<span class="e">$1</span>]')
+      ).join('\n');
+      if (atBottom) logOut.scrollTop = logOut.scrollHeight;
+    }
+  } catch {}
+  logBusy = false;
+}
+setInterval(pullLogs, 1200);
+
+/* ---------- 安装 / 更新 / 自启 ---------- */
+let updDirs = [], pendingUpdate = null;
+const autoStart = $('autoStart'), installBtn = $('installBtn'), updBtn = $('updBtn'), verText = $('verText');
+
+(async function initSetup() {
+  if (!hasBridge) { checkUpdate(true); return; }
+  try { const s = await api('autostart-status'); autoStart.checked = s.enabled; } catch {}
+  try {
+    const s = await api('install-status');
+    if (s.installed) { installBtn.textContent = '已安装 ✓'; installBtn.disabled = true; }
+  } catch {}
+  checkUpdate(true);
+})();
+
+autoStart.addEventListener('change', async () => {
+  const want = autoStart.checked;
+  try { await api('autostart', { enable: want }); showToast(want ? '已开启开机自启' : '已关闭开机自启'); }
+  catch (e) { autoStart.checked = !want; showToast(String(e.message || e), true); }
+});
+
+installBtn.addEventListener('click', async () => {
+  installBtn.disabled = true; installBtn.textContent = '安装中…';
+  try {
+    const r = await api('install');
+    if (r.already) { installBtn.textContent = '已安装 ✓'; showToast('已经在应用程序目录了'); return; }
+    if (r.installed) { showToast('安装完成，正在从「应用程序」重新启动…'); return; }
+    throw new Error(r.error || '安装失败');
+  } catch (e) {
+    installBtn.disabled = false; installBtn.textContent = '一键安装到「应用程序」';
+    showToast(String(e.message || e), true);
+  }
+});
+
+async function checkUpdate(silent) {
+  updBtn.disabled = true; updBtn.textContent = '检查中…';
+  try {
+    const r = await api('update-check');
+    updDirs = r.dirs || [];
+    if (!r.current) {
+      verText.textContent = 'dsh 尚未下载（首次启动自动拉取最新版）';
+      updBtn.textContent = '检查更新';
+    } else if (r.latest && r.current !== r.latest) {
+      pendingUpdate = r.latest;
+      verText.textContent = 'dsh ' + r.current + ' → ' + r.latest + ' 可更新';
+      updBtn.textContent = '更新到 ' + r.latest;
+    } else {
+      verText.textContent = 'dsh ' + (r.current || r.latest) + '（已是最新）';
+      updBtn.textContent = '检查更新';
+    }
+  } catch (e) {
+    verText.textContent = '';
+    updBtn.textContent = '检查更新';
+    if (!silent) showToast(String(e.message || e), true);
+  }
+  updBtn.disabled = false;
+}
+
+updBtn.addEventListener('click', async () => {
+  if (!pendingUpdate) { checkUpdate(false); return; }
+  updBtn.disabled = true; updBtn.textContent = '更新中…';
+  try {
+    const r = await api('update-apply', { dirs: updDirs });
+    showToast(r.ok ? '已更新到 ' + pendingUpdate + '，下次启动生效（首次拉取约需十几秒）'
+                   : '没有找到可清理的缓存目录');
+    pendingUpdate = null;
+    verText.textContent = 'dsh 将在下次启动时拉取最新版';
+    updBtn.textContent = '检查更新';
+  } catch (e) { showToast(String(e.message || e), true); }
+  updBtn.disabled = false;
+});
+
+/* ---------- 粒子系统（呼吸灯环绕） ---------- */
+(function particles() {
+  const canvas = $('fx'), ctx = canvas.getContext('2d');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let W = 0, H = 0, dpr = 1, mode = 'stop', modeT = 0;   // modeT: 模式过渡 0→1
+  const P = [];
+  const N = Math.min(90, Math.max(50, Math.round(innerWidth / 16)));
+  let orbC = { x: innerWidth / 2, y: 300, r: 86 };
+  let mouse = { x: -9999, y: -9999 };
+
+  function resize() {
+    dpr = Math.min(devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  function trackOrb() {
+    const r = orb.getBoundingClientRect();
+    if (r.width > 0) orbC = { x: r.x + r.width / 2, y: r.y + r.height / 2, r: r.width / 2 };
+  }
+  resize();
+  addEventListener('resize', () => { resize(); trackOrb(); });
+  setInterval(trackOrb, 600);
+  addEventListener('mousemove', (e) => { mouse.x = e.clientX; mouse.y = e.clientY; });
+  addEventListener('mouseleave', () => { mouse.x = mouse.y = -9999; });
+
+  for (let i = 0; i < N; i++) {
+    P.push({
+      x: Math.random() * innerWidth, y: Math.random() * innerHeight,
+      r: 0.6 + Math.random() * 1.7,
+      vx: (Math.random() - 0.5) * 0.22, vy: (Math.random() - 0.5) * 0.22,
+      hue: 165 + Math.random() * 50,
+      a: 0.25 + Math.random() * 0.5,
+      tw: 0.5 + Math.random() * 2, ph: Math.random() * 6.28,
+      orbit: null,   // {ang, rad, spd}
+      ox: 0, oy: 0,  // 当前实际位置（用于平滑过渡）
+    });
+    P[i].ox = P[i].x; P[i].oy = P[i].y;
+  }
+
+  function recruitOrbits(on) {
+    let recruited = 0;
+    for (const p of P) {
+      if (on && recruited < Math.floor(N * 0.45) && Math.random() < 0.6) {
+        p.orbit = { ang: Math.random() * 6.28, rad: orbC.r + 26 + Math.random() * 70,
+                    spd: (0.004 + Math.random() * 0.006) * (Math.random() < 0.5 ? 1 : -1) };
+        recruited++;
+      } else if (!on) p.orbit = null;
+    }
+  }
+
+  const hueLerp = (a, b, t) => a + (b - a) * t;
+  let last = performance.now(), t = 0;
+
+  function frame(now) {
+    const dt = Math.min(32, now - last); last = now; t += dt / 1000;
+    const target = mode;
+    modeT = Math.min(1, modeT + dt / 900);
+    const runT = target === 'run' ? modeT : 1 - modeT;      // 环绕强度
+    const startT = target === 'start' ? modeT : 0;
+
+    ctx.clearRect(0, 0, W, H);
+    const baseHue = hueLerp(190, 35, startT);
+
+    // 连线（仅自由粒子之间）
+    ctx.lineWidth = 0.6;
+    for (let i = 0; i < P.length; i++) {
+      const a = P[i];
+      for (let j = i + 1; j < P.length; j++) {
+        const b = P[j];
+        if (a.orbit || b.orbit) continue;
+        const dx = a.ox - b.ox, dy = a.oy - b.oy;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < 12100) {
+          const al = (1 - Math.sqrt(d2) / 110) * 0.13 * (1 - startT * 0.4);
+          ctx.strokeStyle = `hsla(${baseHue + 20},90%,70%,${al})`;
+          ctx.beginPath(); ctx.moveTo(a.ox, a.oy); ctx.lineTo(b.ox, b.oy); ctx.stroke();
+        }
+      }
+    }
+
+    for (const p of P) {
+      // 运动模型
+      if (p.orbit) {
+        p.orbit.ang += p.orbit.spd * dt / 8;
+        const rr = p.orbit.rad * (1 + 0.12 * Math.sin(t * 1.4 + p.ph));   // 轨道呼吸
+        const gx = orbC.x + Math.cos(p.orbit.ang) * rr * 1.12;            // 椭圆
+        const gy = orbC.y + Math.sin(p.orbit.ang) * rr * 0.92;
+        p.ox += (gx - p.ox) * 0.055; p.oy += (gy - p.oy) * 0.055;
+      } else {
+        p.vx += (Math.random() - 0.5) * 0.004; p.vy += (Math.random() - 0.5) * 0.004;
+        // 鼠标轻微推开
+        const mdx = p.ox - mouse.x, mdy = p.oy - mouse.y, md2 = mdx * mdx + mdy * mdy;
+        if (md2 < 19600 && md2 > 1) { const f = 0.35 / Math.sqrt(md2); p.vx += mdx * f * 0.05; p.vy += mdy * f * 0.05; }
+        const vmax = 0.5 + startT * 0.9;
+        const sp = Math.hypot(p.vx, p.vy);
+        if (sp > vmax) { p.vx = p.vx / sp * vmax; p.vy = p.vy / sp * vmax; }
+        p.x += p.vx * dt / 16; p.y += p.vy * dt / 16;
+        if (p.x < -10) p.x = W + 10; if (p.x > W + 10) p.x = -10;
+        if (p.y < -10) p.y = H + 10; if (p.y > H + 10) p.y = -10;
+        p.ox += (p.x - p.ox) * 0.1; p.oy += (p.y - p.oy) * 0.1;
+      }
+
+      // 绘制（发光点）
+      const tw = 0.6 + 0.4 * Math.sin(t * p.tw + p.ph);
+      const hue = p.orbit ? hueLerp(p.hue, 178, runT) : hueLerp(p.hue, baseHue + 20, 0.3 + startT * 0.7);
+      const alpha = p.a * tw * (p.orbit ? 0.55 + 0.45 * runT : 1);
+      const rad = p.r * (p.orbit ? 1 + 0.35 * runT : 1);
+      const g = ctx.createRadialGradient(p.ox, p.oy, 0, p.ox, p.oy, rad * 3.2);
+      g.addColorStop(0, `hsla(${hue},95%,72%,${alpha})`);
+      g.addColorStop(1, `hsla(${hue},95%,60%,0)`);
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(p.ox, p.oy, rad * 3.2, 0, 6.283); ctx.fill();
+    }
+
+    if (!document.hidden && !reduced) requestAnimationFrame(frame);
+  }
+
+  // 模式联动：状态球变化 → 粒子行为切换
+  let lastMode = 'stop';
+  setInterval(() => {
+    const m = window.__fxMode || 'stop';
+    if (m !== lastMode) {
+      lastMode = m; mode = m; modeT = 0;
+      recruitOrbits(m === 'run');
+      trackOrb();
+    }
+  }, 300);
+
+  window.__fx = { count: P.length, mode: () => lastMode };
+  if (reduced) { recruitOrbits(false); frame(performance.now()); }   // 静态一帧
+  else requestAnimationFrame(frame);
+})();
+
+/* ---------- 自动化自检（结果写进 app.log / 服务端日志） ---------- */
+window.__selfcheck = function () {
+  const cs = (el, p) => getComputedStyle(el)[p];
+  const card = document.querySelector('.card').getBoundingClientRect();
+  const orbR = document.querySelector('.orb').getBoundingClientRect();
+  const canvasOK = !!document.getElementById('fx').getContext('2d');
+  return JSON.stringify({
+    ready: document.readyState,
+    bridge: hasBridge,
+    viewport: { w: innerWidth, h: innerHeight },
+    hOverflow: document.documentElement.scrollWidth > innerWidth,
+    cardCentered: Math.abs(card.x + card.width / 2 - innerWidth / 2) < 2,
+    cardSize: { w: Math.round(card.width), h: Math.round(card.height) },
+    orbCenterX: Math.round(orbR.x + orbR.width / 2),
+    orbState: document.getElementById('orb').dataset.s,
+    pill: document.getElementById('stateText').textContent,
+    mainBtn: document.getElementById('mainBtn').textContent,
+    btnGradient: cs(document.getElementById('mainBtn'), 'backgroundImage').includes('linear-gradient'),
+    cardBlur: cs(document.querySelector('.card'), 'backdropFilter').includes('blur'),
+    fx: { canvas: canvasOK, particles: window.__fx ? window.__fx.count : 0, mode: window.__fx ? window.__fx.mode() : '?' },
+    setupRow: !!document.getElementById('updBtn'),
+    verText: document.getElementById('verText').textContent,
+    h1: cs(document.querySelector('h1'), 'fontSize') + '/' + cs(document.querySelector('h1'), 'fontWeight'),
+  });
+};
+
+refresh();
+</script>
+</body>
+</html>
