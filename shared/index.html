@@ -365,7 +365,7 @@ mainBtn.addEventListener('click', async () => {
     if (st && st.dsh.alive) await api('open');
     else {
       const r = await api('start', { autoOpen: $('autoOpen').checked });
-      showToast(r.status === 'already-running' ? '已在运行，正在打开界面' : '正在启动 dsh web…');
+      showToast(r.status === 'already-running' ? '已在运行，正在打开界面' : '正在启动 dsh web…（刚更新过需重新下载，可能 1-3 分钟，期间请勿反复重启）');
     }
   } catch (e) { showToast(String(e.message || e), true); }
   refresh();
@@ -416,7 +416,10 @@ function toggleLogs(open) {
   if (logsOpen) pullLogs();
 }
 logBtn.addEventListener('click', () => toggleLogs());
-$('clearLog').addEventListener('click', () => { logOut.textContent = '（已清空显示）'; });
+$('clearLog').addEventListener('click', async () => {
+  try { await api('logs-clear'); } catch {}
+  logOut.textContent = '（已清空）';
+});
 
 let logBusy = false;
 async function pullLogs() {

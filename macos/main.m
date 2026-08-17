@@ -182,6 +182,10 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
     }
 }
 
+- (void)clearRing {
+    @synchronized (self.ring) { [self.ring removeAllObjects]; }
+}
+
 - (NSArray<NSString *> *)tail:(NSInteger)n {
     @synchronized (self.ring) {
         if (self.ring.count <= n) return [self.ring copy];
@@ -349,7 +353,7 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
     NSDate *started = [NSDate date];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         ProcMan *strongSelf = weakSelf;
-        while (strongSelf.pollerShouldRun && [started timeIntervalSinceNow] > -120) {
+        while (strongSelf.pollerShouldRun && [started timeIntervalSinceNow] > -300) {
             [NSThread sleepForTimeInterval:1.0];
             if (!strongSelf.child.isRunning) return;
             if ([strongSelf probeDsh:800]) {
@@ -360,7 +364,7 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
             }
         }
         if ([started timeIntervalSinceNow] <= -120) {
-            [strongSelf logLine:@"等待就绪超时（120s）。请展开日志查看原因。"];
+            [strongSelf logLine:@"等待就绪超时（300s）。若刚执行过更新，dsh 需重新下载，请稍后再看日志。"];
             if (onReady) onReady(NO);
         }
     });
@@ -546,6 +550,10 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
     }
     if ([cmd isEqualToString:@"logs"]) {
         return @{@"lines": [pm tail:180]};
+    }
+    if ([cmd isEqualToString:@"logs-clear"]) {
+        [pm clearRing];
+        return @{@"cleared": @YES};
     }
     if ([cmd isEqualToString:@"autostart-status"]) {
         BOOL on = (SMAppService.mainAppService.status == SMAppServiceStatusEnabled);

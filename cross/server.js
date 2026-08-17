@@ -23,7 +23,7 @@ const IS_MAC = process.platform === 'darwin';
 const LAUNCHER_PORT = Number(process.env.LAUNCHER_PORT || 4899);
 const DSH_PORT = Number(process.env.DSH_PORT || 3080);
 const DSH_HOST = '127.0.0.1';
-const START_TIMEOUT_MS = 120_000;
+const START_TIMEOUT_MS = 300_000;
 
 const ROOT = __dirname;
 const SHARED = path.join(ROOT, '..', 'shared');
@@ -152,7 +152,7 @@ function startDsh({ autoOpen = true } = {}) {
         return;
       }
     }
-    log('等待就绪超时（120s）。请展开日志查看原因。');
+    log('等待就绪超时（300s）。若刚执行过更新，dsh 需重新下载，请稍后再看日志。');
   })();
 
   return { ok: true, pid: proc.pid };
@@ -297,6 +297,10 @@ const server = http.createServer(async (req, res) => {
     catch { return send(500, { error: 'shared/index.html 缺失' }); }
   }
   if (req.method === 'GET' && url.pathname === '/api/status') return send(200, await buildStatus());
+  if (req.method === 'POST' && url.pathname === '/api/logs-clear') {
+    ring = [];
+    return send(200, { cleared: true });
+  }
   if (req.method === 'GET' && url.pathname === '/api/logs') {
     const n = Math.min(Number(url.searchParams.get('lines') || 200), RING_MAX);
     return send(200, { lines: ring.slice(-n) });
