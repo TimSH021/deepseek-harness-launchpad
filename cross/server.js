@@ -81,6 +81,60 @@ function adoptFromPidFile() {
   } catch {}
 }
 
+// ---------------------------------------------------------------- dsh 来源（全局 vs npx 缓存）
+let _globalDshCache;
+function globalDshInfo(force) {
+    if (_globalDshCache && !force) return _globalDshCache || {};
+    const fs2 = fs, os2 = os;
+    let bin = null;
+    const candidates = [
+        path.join(os2.homedir(), '.npm-global', 'bin', IS_WIN ? 'dsh.cmd' : 'dsh'),
+        '/opt/homebrew/bin/dsh', '/usr/local/bin/dsh',
+    ];
+    for (const c of candidates) { try { fs2.accessSync(c, fs2.constants.X_OK); bin = c; break; } catch {} }
+    if (!bin) {
+        try {
+            const out = require('child_process').execFileSync(
+                IS_WIN ? 'cmd.exe' : '/bin/zsh',
+                IS_WIN ? ['/c', 'where', 'dsh'] : ['-lc', 'command -v dsh'],
+                { encoding: 'utf8', timeout: 5000 });
+            const first = out.split('\n')[0].trim();
+            if (first && fs2.existsSync(first)) bin = first;
+        } catch {}
+    }
+    _globalDshCache = null;
+    if (bin) {
+        const real = fs2.realpathSync(bin);
+        let dir = path.dirname(real);
+        for (let i = 0; i < 5; i++) {
+            try {
+                const v = JSON.parse(fs2.readFileSync(path.join(dir, 'package.json'), 'utf8')).version;
+                if (v) { _globalDshCache = { path: bin, version: v }; break; }
+            } catch {}
+            const parent = path.dirname(dir);
+            if (parent === dir) break;
+            dir = parent;
+        }
+    }
+    return _globalDshCache || {};
+}
+
+function runShellLogged(cmdLine, timeoutSec) {
+    return new Promise((resolve) => {
+        const shell = IS_WIN ? 'cmd.exe' : (process.env.SHELL || '/bin/bash');
+        const args = IS_WIN ? ['/c', cmdLine] : ['-lc', `exec ${cmdLine}`];
+        const proc = spawn(shell, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+        const onData = (tag) => (d) => {
+            for (const l of d.toString().split('\n')) if (l.trim()) log(`${tag} ${l.trim()}`);
+        };
+        proc.stdout.on('data', onData('[npm]'));
+        proc.stderr.on('data', onData('[npm err]'));
+        const killer = setTimeout(() => { try { proc.kill('SIGTERM'); } catch {} }, timeoutSec * 1000);
+        proc.on('error', () => { clearTimeout(killer); resolve(-1); });
+        proc.on('exit', (code) => { clearTimeout(killer); resolve(code ?? -1); });
+    });
+}
+
 // ---------------------------------------------------------------- 探测
 function probeDsh(timeoutMs = 1500) {
   return new Promise((resolve) => {
@@ -111,7 +165,15 @@ function startDsh({ autoOpen = true } = {}) {
   if (child && pidAlive(child.pid)) return { ok: false, error: 'starting' };
 
   let proc;
-  if (IS_WIN) {
+  const g = globalDshInfo();
+  if (g.path) {
+    // 优先全局安装的 dsh：与终端 dsh 命令同源同版本
+    proc = IS_WIN
+      ? spawn('cmd.exe', ['/c', g.path, 'web', '--port', String(DSH_PORT)],
+          { detached: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      : spawn(g.path, ['web', '--port', String(DSH_PORT)],
+          { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  } else if (IS_WIN) {
     proc = spawn('cmd.exe', ['/c', 'npx', '-y', '@deepseek-ai/dsh', 'web', '--port', String(DSH_PORT)],
       { detached: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   } else {
@@ -305,11 +367,28 @@ const server = http.createServer(async (req, res) => {
     const n = Math.min(Number(url.searchParams.get('lines') || 200), RING_MAX);
     return send(200, { lines: ring.slice(-n) });
   }
+  if (req.method === 'GET' && url.pathname === '/api/dsh-sources') {
+    const g = globalDshInfo();
+    const npx = npxDshInfo();
+    return send(200, { global: g.path ? g : null, npxVersion: npx.current, active: g.path ? 'global' : 'npx' });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/dsh-install-global') {
+    log('安装全局 dsh 命令（npm install -g）');
+    const rc = await runShellLogged('npm install -g @deepseek-ai/dsh', 300);
+    const g = globalDshInfo(true);
+    if (rc !== 0 && !g.path) return send(500, { error: 'npm install -g 失败，请看日志' });
+    return send(200, { installed: !!g.path, version: g.version || '?' });
+  }
   if (req.method === 'GET' && url.pathname === '/api/update-check') {
     const info = npxDshInfo();
+    const g = globalDshInfo();
     return fetchLatest((latest, err) => {
       if (err) return send(502, { error: '检查更新失败: ' + err });
-      send(200, { current: info.current, latest: latest || '', dirs: info.dirs });
+      send(200, {
+        current: g.path ? g.version : info.current,
+        source: g.path ? 'global' : 'npx',
+        latest: latest || '', dirs: info.dirs,
+      });
     });
   }
 
@@ -360,7 +439,15 @@ const server = http.createServer(async (req, res) => {
         try { fs.rmSync(d, { recursive: true, force: true }); removed++; } catch {}
       }
     }
-    log(`更新：清理 npx 缓存 ${removed} 处`);
+    const g = globalDshInfo();
+    if (g.path) {
+      log('更新全局 dsh（npm install -g @deepseek-ai/dsh@latest）');
+      const rc = await runShellLogged('npm install -g @deepseek-ai/dsh@latest', 300);
+      globalDshInfo(true);
+      log(`更新完成：全局升级 rc=${rc}，npx 缓存清理 ${removed} 处`);
+      return send(200, { ok: rc === 0, removed });
+    }
+    log(`更新完成：清理 npx 缓存 ${removed} 处`);
     return send(200, { ok: removed > 0, removed });
   }
   return send(404, { error: 'not found' });

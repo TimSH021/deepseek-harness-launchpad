@@ -86,6 +86,63 @@ static NSDictionary *NpxDshInfo(void) {
     return bestVer ? @{@"version": bestVer, @"dirs": dirs} : @{@"dirs": @[]};
 }
 
+// 全局 dsh 检测：PATH 上的 dsh、真实路径、版本
+static NSDictionary *g_globalDshCache = nil;
+static NSDictionary *ComputeGlobalDshInfo(void) {
+        NSFileManager *fm = NSFileManager.defaultManager;
+        NSString *bin = nil;
+        for (NSString *c in @[[@"~/.npm-global/bin/dsh" stringByExpandingTildeInPath],
+                              @"/opt/homebrew/bin/dsh", @"/usr/local/bin/dsh"]) {
+            if ([fm isExecutableFileAtPath:c]) { bin = c; break; }
+        }
+        if (!bin) {
+            NSTask *t = [NSTask new];
+            t.launchPath = @"/bin/zsh";
+            t.arguments = @[@"-lc", @"command -v dsh"];
+            t.standardOutput = [NSPipe pipe];
+            t.standardError = [NSFileHandle fileHandleWithNullDevice];
+            @try { [t launch]; [t waitUntilExit]; } @catch (NSException *e) {}
+            NSData *d = ((NSPipe *)t.standardOutput).fileHandleForReading.readDataToEndOfFile;
+            NSString *out = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding] ?: @"";
+            NSString *first = [out componentsSeparatedByString:@"\n"].firstObject;
+            if (first.length && [first hasPrefix:@"/"] && [fm isExecutableFileAtPath:first]) bin = first;
+        }
+        if (!bin) { g_globalDshCache = @{}; return g_globalDshCache; }
+        char rp[PATH_MAX] = {0};
+        realpath(bin.UTF8String, rp);
+        NSString *real = [NSString stringWithUTF8String:rp] ?: bin;
+        NSString *dir = real.stringByDeletingLastPathComponent;
+        NSString *ver = nil;
+        for (int i = 0; i < 5 && !ver; i++) {
+            NSString *pj = [dir stringByAppendingPathComponent:@"package.json"];
+            if ([fm fileExistsAtPath:pj]) {
+                NSDictionary *j = [NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:pj]
+                                                                  options:0 error:nil];
+                if ([j[@"version"] isKindOfClass:[NSString class]]) ver = j[@"version"];
+                break;
+            }
+            dir = dir.stringByDeletingLastPathComponent;
+        }
+    g_globalDshCache = @{@"path": bin, @"version": ver ?: @"?"};
+    return g_globalDshCache;
+}
+static NSDictionary *GlobalDshInfo(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ if (!g_globalDshCache) g_globalDshCache = ComputeGlobalDshInfo(); });
+    return g_globalDshCache;
+}
+static NSDictionary *GlobalDshInfoForce(void) {
+    g_globalDshCache = ComputeGlobalDshInfo();
+    return g_globalDshCache;
+}
+
+// 当前生效的 dsh 版本：有全局用全局，否则 npx 缓存
+static NSString *ActiveDshVersion(NSDictionary *npxInfo) {
+    NSDictionary *g = GlobalDshInfo();
+    if (g[@"path"]) return g[@"version"];
+    return npxInfo[@"version"] ?: @"";
+}
+
 // 用户 npm 源（~/.npmrc 的 registry，缺省官方源）
 static NSString *RegistryBase(void) {
     NSString *npmrc = [NSString stringWithContentsOfFile:[@"~/.npmrc" stringByExpandingTildeInPath]
@@ -216,7 +273,7 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
 }
 
 // 探测：TCP 连接 + GET /，校验响应含 __DSH_BOOT__
-- (BOOL)probeDsh:(int)timeoutMs {
+- (BOOL)probePort:(int)port timeoutMs:(int)timeoutMs {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return NO;
     int yes = 1;
@@ -224,7 +281,7 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
 
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)kDshPort);
+    addr.sin_port = htons((uint16_t)port);
     addr.sin_addr.s_addr = inet_addr(kDSHHost.UTF8String);
 
     int flags = fcntl(fd, F_GETFL, 0);
@@ -240,7 +297,7 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
     const char *req = [[NSString stringWithFormat:
-        @"GET / HTTP/1.1\r\nHost: %@:%d\r\nConnection: close\r\n\r\n", kDSHHost, kDshPort]
+        @"GET / HTTP/1.1\r\nHost: %@:%d\r\nConnection: close\r\n\r\n", kDSHHost, port]
         cStringUsingEncoding:NSASCIIStringEncoding];
     ssize_t unusedSnd = send(fd, req, strlen(req), 0);
     (void)unusedSnd;
@@ -258,6 +315,7 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
     NSString *s = [[NSString alloc] initWithData:buf encoding:NSUTF8StringEncoding];
     return s && [s containsString:@"__DSH_BOOT__"];
 }
+- (BOOL)probeDsh:(int)timeoutMs { return [self probePort:kDshPort timeoutMs:timeoutMs]; }
 
 - (NSURL *)pidFileURL { return [StateDir() URLByAppendingPathComponent:@"child.pid"]; }
 
@@ -311,9 +369,13 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
 - (NSDictionary *)startWithAutoOpen:(BOOL)autoOpen onReady:(void(^)(BOOL))onReady error:(NSString **)err {
     if ([self oursRunning]) { *err = @"已有实例正在启动或运行"; return nil; }
 
+    NSDictionary *gdsh = GlobalDshInfo();
+    NSString *cmdLine = gdsh[@"path"]
+        ? [NSString stringWithFormat:@"exec \"%@\" web --port %d", gdsh[@"path"], kDshPort]
+        : [NSString stringWithFormat:@"exec npx -y @deepseek-ai/dsh web --port %d", kDshPort];
     NSTask *p = [NSTask new];
     p.launchPath = @"/bin/zsh";
-    p.arguments = @[@"-lc", [NSString stringWithFormat:@"exec npx -y @deepseek-ai/dsh web --port %d", kDshPort]];
+    p.arguments = @[@"-lc", cmdLine];
     p.environment = [[NSProcessInfo processInfo] environment];
 
     NSPipe *outPipe = [NSPipe pipe], *errPipe = [NSPipe pipe];
@@ -483,6 +545,37 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
 }
 
 @end
+// 同步跑一条 shell 命令（登录 shell 拿 PATH），日志进 ring
+static int RunShellLogged(NSString *cmdLine, int timeoutSec) {
+    NSTask *t = [NSTask new];
+    t.launchPath = @"/bin/zsh";
+    t.arguments = @[@"-lc", cmdLine];
+    NSPipe *out = [NSPipe pipe], *err = [NSPipe pipe];
+    t.standardOutput = out; t.standardError = err;
+    ProcMan *pm = ProcMan.shared;
+    void (^attach)(NSFileHandle *, NSString *) = ^(NSFileHandle *h, NSString *tag) {
+        h.readabilityHandler = ^(NSFileHandle *fh) {
+            NSData *d = fh.availableData;
+            if (!d.length) { fh.readabilityHandler = nil; return; }
+            NSString *txt = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding] ?: @"";
+            for (NSString *l in [txt componentsSeparatedByString:@"\n"])
+                if ([[l stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] length])
+                    [pm logLine:[NSString stringWithFormat:@"%@ %@", tag, l]];
+        };
+    };
+    attach(out.fileHandleForReading, @"[npm]");
+    attach(err.fileHandleForReading, @"[npm err]");
+    @try { [t launch]; } @catch (NSException *e) { return -1; }
+    // 超时兜底：到点杀掉
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)timeoutSec * NSEC_PER_SEC),
+                   dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        if (t.isRunning) [t terminate];
+    });
+    [t waitUntilExit];
+    return t.terminationStatus;
+}
+
+
 
 #pragma mark - JS 桥接
 
@@ -577,8 +670,25 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
         NSString *noRelaunch = [[NSProcessInfo processInfo] environment][@"DSH_LAUNCHER_NO_RELAUNCH"];
         return InstallAppTo(dst, noRelaunch.length == 0);
     }
+    if ([cmd isEqualToString:@"dsh-sources"]) {
+        NSDictionary *g = GlobalDshInfo();
+        NSDictionary *npx = NpxDshInfo();
+        return @{
+            @"global": g[@"path"] ? g : NSNull.null,
+            @"npxVersion": npx[@"version"] ?: @"",
+            @"active": g[@"path"] ? @"global" : @"npx",
+        };
+    }
+    if ([cmd isEqualToString:@"dsh-install-global"]) {
+        AppLog(@"安装全局 dsh 命令（npm install -g）");
+        int rc = RunShellLogged(@"exec npm install -g @deepseek-ai/dsh", 300);
+        NSDictionary *g = GlobalDshInfoForce();
+        if (rc != 0 && !g[@"path"]) { *err = @"npm install -g 失败，请看日志"; return nil; }
+        return @{@"installed": @(g[@"path"] != nil), @"version": g[@"version"] ?: @"?"};
+    }
     if ([cmd isEqualToString:@"update-check"]) {
         NSDictionary *info = NpxDshInfo();
+        NSDictionary *g = GlobalDshInfo();
         __block NSString *latest = nil, *lerr = nil;
         dispatch_semaphore_t sem = dispatch_semaphore_create(0);
         FetchLatestDshVersion(^(NSString *v, NSString *e) {
@@ -586,7 +696,9 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
         });
         dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC));
         if (lerr) { *err = [@"检查更新失败: " stringByAppendingString:lerr]; return nil; }
-        return @{@"current": info[@"version"] ?: @"", @"latest": latest, @"dirs": info[@"dirs"]};
+        return @{@"current": g[@"path"] ? g[@"version"] : (info[@"version"] ?: @""),
+                 @"source": g[@"path"] ? @"global" : @"npx",
+                 @"latest": latest, @"dirs": info[@"dirs"]};
     }
     if ([cmd isEqualToString:@"update-apply"]) {
         NSArray<NSString *> *dirs = payload[@"dirs"] ?: @[];
@@ -595,8 +707,16 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
             if ([dir hasPrefix:[@"~/.npm/_npx" stringByExpandingTildeInPath]]
                 && [[NSFileManager defaultManager] removeItemAtPath:dir error:nil]) removed++;
         }
-        AppLog([NSString stringWithFormat:@"更新：清理 npx 缓存 %ld 处", (long)removed]);
-        return @{@"ok": @(removed > 0), @"removed": @(removed)};
+        NSDictionary *g = GlobalDshInfo();
+        BOOL globalWas = g[@"path"] != nil;
+        int rc = 0;
+        if (globalWas) {
+            AppLog(@"更新全局 dsh（npm install -g @deepseek-ai/dsh@latest）");
+            rc = RunShellLogged(@"exec npm install -g @deepseek-ai/dsh@latest", 300);
+        }
+        AppLog([NSString stringWithFormat:@"更新完成：npx 缓存清理 %ld 处%@",
+                (long)removed, globalWas ? @"，全局已升级" : @""]);
+        return @{@"ok": @(rc == 0), @"removed": @(removed)};
     }
     *err = [@"unknown cmd " stringByAppendingString:cmd ?: @""];
     return nil;
@@ -723,6 +843,22 @@ int main(int argc, const char *argv[]) {
         return 0;
     }
 
+    if ([args containsObject:@"--cmd"] && args.count >= 3) {
+        [ProcMan.shared adoptFromPidFile];
+        NSString *cmd = args[2];
+        NSDictionary *payload = @{};
+        if (args.count >= 4) {
+            NSDictionary *j = [NSJSONSerialization JSONObjectWithData:[args[3] dataUsingEncoding:NSUTF8StringEncoding]
+                                                              options:0 error:nil];
+            if ([j isKindOfClass:[NSDictionary class]]) payload = j;
+        }
+        NSString *err = nil;
+        NSDictionary *r = [BridgeVC executeCmd:cmd payload:payload error:&err];
+        if (err) { printf("ERROR: %s\n", err.UTF8String); return 1; }
+        printf("%s\n", [r description].UTF8String);
+        return 0;
+    }
+
     if ([args containsObject:@"--bridge-test"]) {
         [ProcMan.shared adoptFromPidFile];
         __block NSInteger pass = 0, fail = 0;
@@ -735,18 +871,23 @@ int main(int argc, const char *argv[]) {
         r = [BridgeVC executeCmd:@"update-check" payload:@{} error:&err]; check(@"update-check", r, err); err = nil;
         r = [BridgeVC executeCmd:@"logs" payload:@{} error:&err]; check(@"logs", r, err); err = nil;
 
-        // 启动→就绪→停止 生命周期（用环境变量的隔离端口，不碰 3080）
-        r = [BridgeVC executeCmd:@"start" payload:@{@"autoOpen": @NO} error:&err];
-        if (!err) {
-            BOOL ready = NO;
-            for (int i = 0; i < 30 && !ready; i++) { [NSThread sleepForTimeInterval:1.0]; ready = [ProcMan.shared probeDsh:800]; }
-            printf("[info] start pid=%s ready=%d\n", [r[@"pid"] stringValue].UTF8String, ready);
-            if (!ready) { fail++; printf("[FAIL] start 就绪超时\n"); }
-            else {
-                r = [BridgeVC executeCmd:@"stop" payload:@{} error:&err];
-                check(@"stop", r, err); err = nil;
-            }
-        } else { check(@"start", nil, err); err = nil; }
+        // 启动→就绪→停止 生命周期（隔离端口）。注意：装了 task-board 等插件后
+        // 同一 profile 不允许双实例（ledger 锁），此时真实例在跑就只测 already-running 分支。
+        if ([ProcMan.shared probePort:3080 timeoutMs:800]) {
+            printf("[skip] start/stop     真实例占用同一 profile（插件 ledger 锁），跳过生命周期段\n");
+        } else {
+            r = [BridgeVC executeCmd:@"start" payload:@{@"autoOpen": @NO} error:&err];
+            if (!err) {
+                BOOL ready = NO;
+                for (int i = 0; i < 30 && !ready; i++) { [NSThread sleepForTimeInterval:1.0]; ready = [ProcMan.shared probeDsh:800]; }
+                printf("[info] start pid=%s ready=%d\n", [r[@"pid"] stringValue].UTF8String, ready);
+                if (!ready) { fail++; printf("[FAIL] start 就绪超时（看 state/dsh-web.log）\n"); }
+                else {
+                    r = [BridgeVC executeCmd:@"stop" payload:@{} error:&err];
+                    check(@"stop", r, err); err = nil;
+                }
+            } else { check(@"start", nil, err); err = nil; }
+        }
 
         // 外部实例强制停止：起一个无关 http 服务冒充外部进程再按端口强停
         NSTask *dummy = [NSTask new];

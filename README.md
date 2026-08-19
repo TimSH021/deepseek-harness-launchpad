@@ -133,6 +133,16 @@ DSH_LAUNCHER_DSH_PORT=4895 "DeepSeek Harness 启动台.app/Contents/MacOS/DSH La
 **Q：更新是怎么生效的？**
 清理 npx 缓存目录，下次启动自动从你的 npm 源拉取最新版（首次约十几秒）。正在运行的实例不受影响，重启后生效。
 
+**Q：dsh 到底装没装？启动器用哪个版本？**
+dsh 有三种安装模式：**npx 快速体验**（官方推荐，零安装走缓存）、**全局安装**（终端可直接敲 `dsh`）、**源码安装**（开发者专用）。启动台界面会显示当前「来源：全局 vX.X / npx 缓存 vX.X」，优先用全局版（和终端命令同源同版本），没有全局版时可点「安装 dsh 终端命令」一键安装。
+
+**Q：怎么安装插件？**
+```bash
+npm install -g pnpm                                        # dsh 插件管理依赖 pnpm，先装它
+dsh plugin --profile web add <插件包名>                    # 例如 @linxin666/dsh-web-ui-all@latest
+```
+装完在启动台「停止」再「启动」即可生效。注意：部分插件（如 task-board）对 profile 加独占锁，同一时间只能跑一个实例。网络慢时给 pnpm 配镜像：`pnpm config set registry https://registry.npmmirror.com`。
+
 **Q：3080 被别的程序占了会怎样？**
 就绪探测会校验响应内容，非 dsh 页面不算「已运行」；启动新实例时 dsh 自身会报端口占用，日志抽屉里可以看到原因。
 

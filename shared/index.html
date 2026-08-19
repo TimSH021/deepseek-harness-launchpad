@@ -254,8 +254,10 @@ html.web .apponly{display:none}
         </label>
         <button class="chip" id="installBtn">一键安装到「应用程序」</button>
       </span>
+      <button class="chip" id="dshInstallBtn" hidden>安装 dsh 终端命令</button>
       <button class="chip" id="updBtn">检查更新</button>
       <span class="ver" id="verText"></span>
+      <span class="ver" id="srcText"></span>
     </div>
     <section class="logs" id="logsPanel" hidden>
       <div class="logbar"><span>DSH 实时输出</span><button id="clearLog">清空</button></div>
@@ -445,14 +447,42 @@ let updDirs = [], pendingUpdate = null;
 const autoStart = $('autoStart'), installBtn = $('installBtn'), updBtn = $('updBtn'), verText = $('verText');
 
 (async function initSetup() {
-  if (!hasBridge) { checkUpdate(true); return; }
-  try { const s = await api('autostart-status'); autoStart.checked = s.enabled; } catch {}
-  try {
-    const s = await api('install-status');
-    if (s.installed) { installBtn.textContent = '已安装 ✓'; installBtn.disabled = true; }
-  } catch {}
+  if (hasBridge) {
+    try { const s = await api('autostart-status'); autoStart.checked = s.enabled; } catch {}
+    try {
+      const s = await api('install-status');
+      if (s.installed) { installBtn.textContent = '已安装 ✓'; installBtn.disabled = true; }
+    } catch {}
+  }
+  refreshSources();
   checkUpdate(true);
 })();
+
+/* dsh 来源模式：全局安装（终端有 dsh 命令，装插件用）vs npx 缓存 */
+const dshInstallBtn = $('dshInstallBtn'), srcText = $('srcText');
+let dshSources = null;
+async function refreshSources() {
+  try {
+    dshSources = await api('dsh-sources');
+    if (dshSources.global) {
+      srcText.textContent = '来源：全局 v' + dshSources.global.version + ' · 终端 dsh 可用';
+      dshInstallBtn.hidden = true;
+    } else {
+      srcText.textContent = '来源：npx 缓存' + (dshSources.npxVersion ? ' v' + dshSources.npxVersion : '') + ' · 终端无 dsh 命令';
+      srcText.title = '安装插件（dsh plugin add）需要终端 dsh 命令，点右侧「安装 dsh 终端命令」';
+      dshInstallBtn.hidden = false;
+    }
+  } catch {}
+}
+dshInstallBtn.addEventListener('click', async () => {
+  dshInstallBtn.disabled = true; dshInstallBtn.textContent = '安装中…（约 1 分钟）';
+  try {
+    const r = await api('dsh-install-global');
+    showToast(r.installed ? 'dsh 命令已装好（v' + r.version + '），现在可以在终端用 dsh plugin 安装插件了' : '安装未成功，请展开日志查看');
+    refreshSources(); checkUpdate(true);
+  } catch (e) { showToast(String(e.message || e), true); refreshSources(); }
+  dshInstallBtn.disabled = false; dshInstallBtn.textContent = '安装 dsh 终端命令';
+});
 
 autoStart.addEventListener('change', async () => {
   const want = autoStart.checked;
@@ -502,8 +532,8 @@ updBtn.addEventListener('click', async () => {
   updBtn.disabled = true; updBtn.textContent = '更新中…';
   try {
     const r = await api('update-apply', { dirs: updDirs });
-    showToast(r.ok ? '已更新到 ' + pendingUpdate + '，下次启动生效（首次拉取约需十几秒）'
-                   : '没有找到可清理的缓存目录');
+    showToast(r.ok ? ('已更新到 ' + pendingUpdate + (dshSources && dshSources.global ? '（npm 全局升级，约 1-3 分钟）' : '，下次启动自动拉取（约 1-3 分钟）'))
+                   : '没有找到可更新内容');
     pendingUpdate = null;
     verText.textContent = 'dsh 将在下次启动时拉取最新版';
     updBtn.textContent = '检查更新';
