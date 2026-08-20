@@ -376,7 +376,15 @@ static NSDictionary *InstallAppTo(NSString *dstPath, BOOL relaunch) {
     NSTask *p = [NSTask new];
     p.launchPath = @"/bin/zsh";
     p.arguments = @[@"-lc", cmdLine];
-    p.environment = [[NSProcessInfo processInfo] environment];
+    // 环境加固：npm-global 垫前（登录 shell 只读 zprofile，用户常把 PATH 写在 zshrc），
+    // corepack 指向用户镜像源（老 corepack 直连 npmjs.org 会挂）
+    NSMutableDictionary *env = [[[NSProcessInfo processInfo] environment] mutableCopy];
+    NSString *npmBin = [@"~/.npm-global/bin" stringByExpandingTildeInPath];
+    if (![env[@"PATH"] hasPrefix:npmBin])
+        env[@"PATH"] = [NSString stringWithFormat:@"%@:%@", npmBin, env[@"PATH"] ?: @""];
+    if (!env[@"COREPACK_NPM_REGISTRY"] || [env[@"COREPACK_NPM_REGISTRY"] length] == 0)
+        env[@"COREPACK_NPM_REGISTRY"] = RegistryBase();
+    p.environment = env;
 
     NSPipe *outPipe = [NSPipe pipe], *errPipe = [NSPipe pipe];
     p.standardOutput = outPipe;

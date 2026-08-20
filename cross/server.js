@@ -164,23 +164,30 @@ function openBrowser(url) {
 function startDsh({ autoOpen = true } = {}) {
   if (child && pidAlive(child.pid)) return { ok: false, error: 'starting' };
 
+  // 环境加固：npm-global 垫前（GUI/登录环境常缺它）+ corepack 走用户镜像
+  const hardenedEnv = { ...process.env };
+  const npmBin = path.join(os.homedir(), '.npm-global', 'bin');
+  if (!String(hardenedEnv.PATH || '').startsWith(npmBin))
+    hardenedEnv.PATH = `${npmBin}:${hardenedEnv.PATH || ''}`;
+  if (!hardenedEnv.COREPACK_NPM_REGISTRY) hardenedEnv.COREPACK_NPM_REGISTRY = registryBase();
+
   let proc;
   const g = globalDshInfo();
   if (g.path) {
     // 优先全局安装的 dsh：与终端 dsh 命令同源同版本
     proc = IS_WIN
       ? spawn('cmd.exe', ['/c', g.path, 'web', '--port', String(DSH_PORT)],
-          { detached: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+          { detached: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: hardenedEnv })
       : spawn(g.path, ['web', '--port', String(DSH_PORT)],
-          { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+          { detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: hardenedEnv });
   } else if (IS_WIN) {
     proc = spawn('cmd.exe', ['/c', 'npx', '-y', '@deepseek-ai/dsh', 'web', '--port', String(DSH_PORT)],
-      { detached: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      { detached: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: hardenedEnv });
   } else {
     // 登录 shell 拿到用户 PATH（homebrew / nvm 等）；detached 使子进程自成进程组，可整组停止
     const shell = process.env.SHELL && fs.existsSync(process.env.SHELL) ? process.env.SHELL : '/bin/bash';
     proc = spawn(shell, ['-lc', `exec npx -y @deepseek-ai/dsh web --port ${DSH_PORT}`],
-      { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      { detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: hardenedEnv });
   }
 
   child = { pid: proc.pid, spawn: proc, startedAt: Date.now(), adopted: false };
